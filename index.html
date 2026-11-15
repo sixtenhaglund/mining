@@ -121,6 +121,12 @@ MINERALS.forEach((m, i) => { m.id = i; if (!m.costume) m.costume = "new/mineral_
 const LAYER_MINERALS = LAYERS.map((_, L) => MINERALS.filter(m => m.layer === L));
 const CORE_MINERAL = MINERALS.length - 1;
 
+function fmtPct(c) {
+  const v = c * 100;
+  if (v >= 10) return Math.round(v) + "%";
+  if (v >= 1) return v.toFixed(1) + "%";
+  return Number(v.toPrecision(2)) + "%";
+}
 // Real chance of each mineral in its layer (for the index)
 const CHANCE = (() => {
   const p = new Array(MINERALS.length).fill(0);
@@ -2167,6 +2173,7 @@ function drawIndex() {
     if (!found) label("?", x + cw / 2, y + chh * 0.56, ms, "#6a5e52", "center");
     rr(x + 8, y + chh - 12, cw - 16, 5, 2); ctx.fillStyle = found ? rarityColor(m.rarity, T / 30) : "#3a322a"; ctx.fill();
     if (found) label("x" + fmt(S.found[m.id]), x + cw - 8, y + 20, 13, "#cbbca8", "right", FONT_B);
+    { const pc = m.d < 0 ? "Core" : fmtPct(CHANCE[m.id]); label(pc, x + 8, y + 20, fitSize(pc, 12, cw * 0.5, FONT_B), "#9fd8ff", "left", FONT_B); }
     reg(id, x, y, cw, chh, () => { SFX.click(); ui.idxPick = m.id; });
   });
   const m = MINERALS[ui.idxPick], found = S.found[m.id] > 0;
@@ -2183,7 +2190,7 @@ function drawIndex() {
   label(`+${fmt(m.gold)} Gold`, cxp, ly + 58, 20, "#ffd447", "center");
   const wm = `with your x${fmt(mult)}: +${fmt(m.gold * mult)}`;
   label(wm, cxp, ly + 80, fitSize(wm, 14, pw - 20, FONT_B), "#cbbca8", "center", FONT_B, false);
-  const chance = m.d < 0 ? "Only from breaking the Core" : `Chance: 1 in ${fmt(Math.round(1 / CHANCE[m.id]))}`;
+  const chance = m.d < 0 ? "Only from breaking the Core" : `Chance: ${fmtPct(CHANCE[m.id])}  (1 in ${fmt(Math.round(1 / CHANCE[m.id]))})`;
   label(chance, cxp, ly + 106, fitSize(chance, 16, pw - 20, FONT_B), "#cbbca8", "center", FONT_B, false);
   label(`Found: ${fmt(S.found[m.id])}`, cxp, ly + 128, 16, "#cbbca8", "center", FONT_B, false);
 }
