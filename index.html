@@ -384,11 +384,22 @@ const INK = "#160f0b";   // the dark outline colour every drawing shares
 // =====================================================================
 let ctx;   // set up later, all drawing functions use it
 
+// ---------- speed tricks ----------
+// Drawing a shape with paths is slow; drawing a finished picture is fast.
+// So things that look the same every frame (glows, minerals, the cave walls)
+// get drawn ONCE into a hidden canvas (a "sprite"), and then we just copy it.
+const GFX = { low: false, canSprite: typeof document !== "undefined" && typeof document.createElement === "function", built: 0 };
+function makeCanvas(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
+function devScale() { return scale * dpr; }   // real screen pixels per world unit
+// draw into a hidden canvas with the normal drawing functions, then switch back
+function paintInto(c, fn) { const old = ctx; ctx = c.getContext("2d"); try { fn(); } finally { ctx = old; } }
+function clearSprites() { starSprites.clear(); glowSprites.clear(); minSprites.clear(); chipSprites.clear(); rockSprites.clear(); caveLayers = null; darkSprite = null; }
+
 function rarityColor(r, t = 0) {
   const c = RARITY_COLOR[r];
-  if (c === "rainbow") return hsl((t * 120) % 360, 100, 60);
+  if (c === "rainbow") return hsl(Math.round((t * 120) % 360 / 6) * 6, 100, 60);
   if (c === "secret") return (Math.sin(t * 4) > 0) ? "#ff2020" : "#600000";
-  if (c === "admin") return hsl(0, 0, 50 + Math.sin(t * 3) * 45);
+  if (c === "admin") return hsl(0, 0, Math.round((50 + Math.sin(t * 3) * 45) / 3) * 3);
   return c;
 }
 function rarityGlowColor(r, t) {
@@ -466,12 +477,35 @@ function visOf(m) {
 
 // Draw a mineral centred at x,y. s = its size (about its radius).
 // opts.sil = silhouette (not found yet), opts.t = time for sparkles
+const minSprites = new Map();
+function mineralSprite(m, s, sil) {
+  const ds = devScale(), STEP = 1.06;                       // sizes come in 6% steps
+  const b = Math.round(Math.log(s * ds) / Math.log(STEP));
+  const key = m.id + (sil ? "s" : "") + ":" + b;
+  let e = minSprites.get(key);
+  if (e) return e;
+  if (minSprites.size > 500) minSprites.clear();
+  const S2 = Math.pow(STEP, b) / ds;                         // the size this sprite was drawn at
+  const left = 1.3 * S2, top = 1.35 * S2, w = 2.6 * S2, hh = 2.35 * S2;
+  const c = makeCanvas(w * ds + 2, hh * ds + 2);
+  paintInto(c, () => { ctx.setTransform(ds, 0, 0, ds, 1, 1); drawMineralBody(m, left, top, S2, sil); });
+  e = { c, s: S2, left, top, w: (w * ds + 2) / ds, h: (hh * ds + 2) / ds };
+  minSprites.set(key, e);
+  return e;
+}
 function drawMineral(m, x, y, s, opts = {}) {
-  const v = visOf(m), g = v.geo, t = opts.t || 0;
+  if (!(s > 0.3)) return;
+  if (GFX.canSprite && s * devScale() < 300) {
+    const e = mineralSprite(m, s, !!opts.sil), k = s / e.s;
+    ctx.drawImage(e.c, x - (e.left + 1 / devScale()) * k, y - (e.top + 1 / devScale()) * k, e.w * k, e.h * k);
+  } else drawMineralBody(m, x, y, s, opts.sil);
+  if (!opts.sil) drawMineralExtras(m, x, y, s, opts.t || 0);
+}
+function drawMineralBody(m, x, y, s, sil) {
+  const v = visOf(m), g = v.geo;
   ctx.save();
   ctx.translate(x, y);
   ctx.lineJoin = "round"; ctx.lineCap = "round";
-  const sil = opts.sil;
   const outline = sil ? "#2c2620" : v.invert ? "#f0f0f0" : INK;
   const lw = Math.max(1.5, s * 0.07);
   if (v.type === "lump") {
@@ -499,7 +533,14 @@ function drawMineral(m, x, y, s, opts = {}) {
       ctx.lineWidth = lw * 0.8; ctx.strokeStyle = INK; ctx.stroke();
     }
   }
-  if (!sil) {
+  ctx.restore();
+}
+// the moving parts of a mineral (drips, sparkles) are drawn live on top of the sprite
+function drawMineralExtras(m, x, y, s, t) {
+  const v = visOf(m), g = v.geo;
+  if (!v.drip && !v.stars && !v.sparkle) return;
+  ctx.save(); ctx.translate(x, y);
+  {
     if (v.drip) {
       ctx.fillStyle = v.drip;
       for (let i = 0; i < 3; i++) { const dx = (i - 1) * s * 0.3, ph = (t * 0.7 + i * 0.37) % 1; const dy = s * 0.46 + ph * s * 0.35; ctx.globalAlpha = 1 - ph; ctx.beginPath(); ctx.arc(dx, dy, s * 0.05, 0, TAU); ctx.fill(); }
@@ -585,22 +626,48 @@ function smoothBlob(pts) {   // smooth closed shape through points
   for (let i = 0; i < n; i++) { const p = pts[i], q = mid(p, pts[(i + 1) % n]); ctx.quadraticCurveTo(p[0], p[1], q[0], q[1]); }
   ctx.closePath();
 }
+const starSprites = new Map();
 function star(x, y, r, color, alpha = 1) {   // 4-point sparkle
   if (r <= 0.2) return;
+  if (GFX.canSprite) {   // a sparkle sprite per colour, copied instead of re-drawn
+    let c = starSprites.get(color);
+    if (!c) {
+      if (starSprites.size > 120) starSprites.clear();
+      const N = 48, R = N / 2; c = makeCanvas(N, N);
+      const g = c.getContext("2d"); g.fillStyle = color; g.beginPath();
+      g.moveTo(R, 0); g.quadraticCurveTo(R, R, N, R); g.quadraticCurveTo(R, R, R, N); g.quadraticCurveTo(R, R, 0, R); g.quadraticCurveTo(R, R, R, 0); g.fill();
+      starSprites.set(color, c);
+    }
+    const old = ctx.globalAlpha; ctx.globalAlpha = old * alpha;
+    ctx.drawImage(c, x - r, y - r, r * 2, r * 2);
+    ctx.globalAlpha = old;
+    return;
+  }
   ctx.save(); ctx.globalAlpha *= alpha; ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(x, y - r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.quadraticCurveTo(x, y, x, y + r);
   ctx.quadraticCurveTo(x, y, x - r, y); ctx.quadraticCurveTo(x, y, x, y - r);
   ctx.fill(); ctx.restore();
 }
+const glowSprites = new Map();
+function glowSprite(color) {
+  let c = glowSprites.get(color);
+  if (c) return c;
+  if (glowSprites.size > 200) glowSprites.clear();
+  const N = 128; c = makeCanvas(N, N);
+  const g = c.getContext("2d"), gr = g.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+  gr.addColorStop(0, color); gr.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = gr; g.fillRect(0, 0, N, N);
+  glowSprites.set(color, c);
+  return c;
+}
 function glow(x, y, r, color, alpha = 1) {
-  if (r <= 1) return;
+  if (r <= 1 || alpha <= 0.003) return;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-  g.addColorStop(0, color); g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.globalAlpha *= alpha; ctx.fillStyle = g;
-  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha *= alpha;
+  if (GFX.canSprite) ctx.drawImage(glowSprite(color), x - r, y - r, r * 2, r * 2);
+  else { const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, color); g.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2); }
   ctx.restore();
 }
 
@@ -624,11 +691,28 @@ function rockShape(seed) {
   }
   return { pts, spots, cracks };
 }
+const rockSprites = new Map();
+function drawRockSprite(x, y, R, pal, shape, rot) {
+  const ds = devScale(), key = shape.pts[0][0].toFixed(5) + pal.body + Math.round(R * ds);
+  let e = rockSprites.get(key);
+  if (!e) {
+    if (rockSprites.size > 60) rockSprites.clear();
+    const S2 = Math.ceil(R * 2.3 * ds) + 4;
+    const c = makeCanvas(S2, S2);
+    paintInto(c, () => { ctx.setTransform(ds, 0, 0, ds, S2 / 2, S2 / 2); drawRockBody(0, 0, R, pal, shape, 0, {}); });
+    e = { c, half: S2 / 2 / ds, size: S2 / ds };
+    rockSprites.set(key, e);
+  }
+  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(x, y + R * 0.9, R * 0.95, R * 0.18, 0, 0, TAU); ctx.fill();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot || 0); ctx.drawImage(e.c, -e.half, -e.half, e.size, e.size); ctx.restore();
+}
 function drawRock(x, y, R, pal, shape, dmg, o = {}) {
   if (!(R > 1)) return;
-  ctx.save();
-  // ground shadow
   ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(x, y + R * 0.9, R * 0.95, R * 0.18, 0, 0, TAU); ctx.fill();
+  drawRockBody(x, y, R, pal, shape, dmg, o);
+}
+function drawRockBody(x, y, R, pal, shape, dmg, o = {}) {
+  ctx.save();
   ctx.translate(x, y);
   ctx.scale(o.sx || 1, o.sy || 1);
   ctx.rotate(o.rot || 0);
@@ -995,55 +1079,82 @@ function buildCave(L, W, H, ground) {
   for (let i = 0; i < 90; i++) c.stars.push({ x: r() * W, y: r() * ground, s: r() * 1.8 + 0.4, ph: r() * TAU });
   return c;
 }
+// The parts of the cave that never move (far wall, ceiling, floor) are painted once
+// into hidden canvases, a bit bigger than the screen so parallax can slide them.
+let caveLayers = null;
+const CAVE_M = 60;   // extra border for parallax
+function buildCaveLayers(L, lay, c) {
+  const { W, H, ground } = lay, pal = CAVE_PAL[L], ds = devScale(), M = CAVE_M;
+  const live = !GFX.canSprite;
+  const mk = (y0, y1, fn) => {
+    if (live) return { fn, y0, h: y1 - y0 };
+    const cv = makeCanvas((W + 2 * M) * ds, (y1 - y0) * ds);
+    paintInto(cv, () => { ctx.setTransform(ds, 0, 0, ds, M * ds, -y0 * ds); fn(); });
+    return { c: cv, y0, h: y1 - y0 };
+  };
+  const top = lay.hud - 30;
+  const maxStal = Math.max(...c.stal.map(s => s.l));
+  return {
+    key: c.key + "_" + ds.toFixed(3),
+    far: mk(-M, H + M, () => {
+      for (const b of c.blobs) {
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU);
+        ctx.fillStyle = shade(pal.far, b.f < 0 ? b.f : 0, 1); if (b.f > 0) ctx.fillStyle = shade(pal.far, b.f * 0.5);
+        ctx.fill();
+      }
+      ctx.fillStyle = pal.fog; ctx.fillRect(-M, -M, W + 2 * M, H + 2 * M);   // fog between the far wall and the rest
+    }),
+    stal: mk(-M, top + maxStal + 6, () => {
+      ctx.fillStyle = pal.mid; ctx.fillRect(-200, -100, W + 400, top + 100);
+      for (const s of c.stal) {
+        ctx.beginPath(); ctx.moveTo(s.x - s.w / 2, top); ctx.quadraticCurveTo(s.x - s.w * 0.2, top + s.l * 0.6, s.x, top + s.l); ctx.quadraticCurveTo(s.x + s.w * 0.2, top + s.l * 0.6, s.x + s.w / 2, top); ctx.closePath();
+        ctx.fillStyle = pal.mid; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = shade(pal.mid, -0.4); ctx.stroke();
+      }
+    }),
+    floor: mk(ground - 90, H + 12, () => {
+      ctx.beginPath(); ctx.moveTo(-200, H + 10);
+      for (const b of c.bumps) ctx.lineTo(b[0], ground + b[1]);
+      ctx.lineTo(W + 200, H + 10); ctx.closePath();
+      const fg = ctx.createLinearGradient(0, ground, 0, H); fg.addColorStop(0, shade(pal.floor, 0.12)); fg.addColorStop(1, pal.stripe);
+      ctx.fillStyle = fg; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+      ctx.strokeStyle = pal.stripe; ctx.lineCap = "round"; ctx.lineWidth = 9;   // his dark floor stripes
+      for (let i = 0; i < 9; i++) { const y = ground + 24 + (i % 3) * 20, x = ((i * 173) % (W + 100)) - 50; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 70 + (i * 37) % 90, y); ctx.stroke(); }
+      for (const m of c.mites) { ctx.beginPath(); ctx.moveTo(m.x - m.w / 2, ground + 6); ctx.lineTo(m.x, ground - m.l); ctx.lineTo(m.x + m.w / 2, ground + 6); ctx.closePath(); ctx.fillStyle = pal.mid; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke(); }
+    }),
+  };
+}
+function blitLayer(Lr, dx, dy) {
+  if (Lr.c) ctx.drawImage(Lr.c, -CAVE_M + dx, Lr.y0 + dy, lay.W + 2 * CAVE_M, Lr.h);
+  else { ctx.save(); ctx.translate(dx, dy); Lr.fn(); ctx.restore(); }   // no hidden canvases: draw it live
+}
 function drawCave(L, t, px, py, lay, veinGlow) {
   const { W, H, ground } = lay;
   const pal = CAVE_PAL[L];
-  if (!caveCache || caveCache.key !== L + "_" + Math.round(W) + "_" + Math.round(H)) caveCache = buildCave(L, W, H, ground);
+  if (!caveCache || caveCache.key !== L + "_" + Math.round(W) + "_" + Math.round(H)) { caveCache = buildCave(L, W, H, ground); caveLayers = null; }
   const c = caveCache;
+  if (!caveLayers || caveLayers.key !== c.key + "_" + devScale().toFixed(3)) { caveLayers = buildCaveLayers(L, lay, c); GFX.built++; }
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, pal.top); g.addColorStop(1, pal.bot);
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  if (L === 3) for (const s of c.stars) { ctx.fillStyle = `rgba(220,200,255,${0.4 + 0.4 * Math.sin(t * 2 + s.ph)})`; ctx.fillRect(s.x + px * 0.05, s.y + py * 0.05, s.s, s.s); }
-  // far blobs
-  ctx.save(); ctx.translate(px * 0.15, py * 0.1);
-  for (const b of c.blobs) {
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU);
-    ctx.fillStyle = shade(pal.far, b.f < 0 ? b.f : 0, 1); if (b.f > 0) ctx.fillStyle = shade(pal.far, b.f * 0.5);
-    ctx.fill();
-  }
-  ctx.restore();
-  // fog between the far wall and the rest
-  ctx.fillStyle = pal.fog; ctx.fillRect(0, 0, W, H);
-  // glowing crystals stuck in the wall
+  if (L === 3) { ctx.fillStyle = "rgb(220,200,255)"; for (const s of c.stars) { ctx.globalAlpha = 0.4 + 0.4 * Math.sin(t * 2 + s.ph); ctx.fillRect(s.x + px * 0.05, s.y + py * 0.05, s.s, s.s); } ctx.globalAlpha = 1; }
+  blitLayer(caveLayers.far, px * 0.15, py * 0.1);
+  // glowing crystals stuck in the wall (sprites, so this is cheap)
   ctx.save(); ctx.translate(px * 0.3, py * 0.2);
   for (const k of c.crystals) {
     const tw = 0.6 + 0.4 * Math.sin(t * 1.5 + k.ph);
-    glow(k.x, k.y, k.s * (3 + veinGlow * 3), rarityGlowColor(k.m.rarity, t), (0.25 + veinGlow * 0.5) * tw);
+    if (!GFX.low || veinGlow) glow(k.x, k.y, k.s * (3 + veinGlow * 3), rarityGlowColor(k.m.rarity, t), (0.25 + veinGlow * 0.5) * tw);
     drawMineral(k.m, k.x, k.y, k.s, { t });
   }
   ctx.restore();
-  // ceiling stalactites
-  ctx.save(); ctx.translate(px * 0.5, py * 0.3);
-  const top = lay.hud - 30;
-  ctx.fillStyle = pal.mid; ctx.fillRect(-200, -100, W + 400, top + 100);
-  for (const s of c.stal) {
-    ctx.beginPath(); ctx.moveTo(s.x - s.w / 2, top); ctx.quadraticCurveTo(s.x - s.w * 0.2, top + s.l * 0.6, s.x, top + s.l); ctx.quadraticCurveTo(s.x + s.w * 0.2, top + s.l * 0.6, s.x + s.w / 2, top); ctx.closePath();
-    ctx.fillStyle = pal.mid; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = shade(pal.mid, -0.4); ctx.stroke();
-    if (L === 1 && s.k > 0.6) { const ph = (t * 0.4 + s.k * 7) % 1; ctx.fillStyle = "rgba(160,210,255,0.8)"; ctx.beginPath(); ctx.arc(s.x, top + s.l + ph * (ground - top - s.l), 2.2, 0, TAU); ctx.fill(); }
+  // ceiling (drips are live)
+  blitLayer(caveLayers.stal, px * 0.5, py * 0.3);
+  if (L === 1) {
+    const top = lay.hud - 30;
+    ctx.save(); ctx.translate(px * 0.5, py * 0.3); ctx.fillStyle = "rgba(160,210,255,0.8)"; ctx.beginPath();
+    for (const s of c.stal) if (s.k > 0.6) { const ph = (t * 0.4 + s.k * 7) % 1, dy = top + s.l + ph * (ground - top - s.l); ctx.moveTo(s.x + 2.2, dy); ctx.arc(s.x, dy, 2.2, 0, TAU); }
+    ctx.fill(); ctx.restore();
   }
-  ctx.restore();
-  // floor
-  ctx.save(); ctx.translate(px * 0.7, 0);
-  ctx.beginPath(); ctx.moveTo(-200, H + 10);
-  for (const b of c.bumps) ctx.lineTo(b[0], ground + b[1]);
-  ctx.lineTo(W + 200, H + 10); ctx.closePath();
-  const fg = ctx.createLinearGradient(0, ground, 0, H); fg.addColorStop(0, shade(pal.floor, 0.12)); fg.addColorStop(1, pal.stripe);
-  ctx.fillStyle = fg; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
-  // his dark floor stripes
-  ctx.strokeStyle = pal.stripe; ctx.lineCap = "round"; ctx.lineWidth = 9;
-  for (let i = 0; i < 9; i++) { const y = ground + 24 + (i % 3) * 20, x = ((i * 173) % (W + 100)) - 50; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 70 + (i * 37) % 90, y); ctx.stroke(); }
-  for (const m of c.mites) { ctx.beginPath(); ctx.moveTo(m.x - m.w / 2, ground + 6); ctx.lineTo(m.x, ground - m.l); ctx.lineTo(m.x + m.w / 2, ground + 6); ctx.closePath(); ctx.fillStyle = pal.mid; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke(); }
-  ctx.restore();
+  blitLayer(caveLayers.floor, px * 0.7, 0);
   // layer specials
   if (L === 2 || L === 4) {   // lava
     const ly = H - 26;
@@ -1052,7 +1163,7 @@ function drawCave(L, t, px, py, lay, veinGlow) {
     ctx.lineTo(W, H); ctx.closePath();
     const lg = ctx.createLinearGradient(0, ly - 8, 0, H); lg.addColorStop(0, "#ffd04a"); lg.addColorStop(0.4, "#ff6a00"); lg.addColorStop(1, "#8a1800");
     ctx.fillStyle = lg; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
-    glow(W / 2, H, W * 0.6, "rgba(255,110,20,0.5)", 0.7 + Math.sin(t * 1.7) * 0.1);
+    if (!GFX.low) glow(W / 2, H, W * 0.6, "rgba(255,110,20,0.5)", 0.7 + Math.sin(t * 1.7) * 0.1);
   }
 }
 function drawNear(L, px, py, lay) {
@@ -1063,13 +1174,28 @@ function drawNear(L, px, py, lay) {
   ctx.restore();
 }
 // darkness everywhere except around the miner's lamp
+let darkSprite = null;
 function drawLighting(L, lamp, t, lay, rush) {
   const { W, H } = lay;
   const flick = 1 + Math.sin(t * 13) * 0.015 + Math.sin(t * 7.3) * 0.02;
   const R = Math.max(W, H) * 0.85 * flick;
-  const g = ctx.createRadialGradient(lamp[0], lamp[1], 0, lamp[0], lamp[1], R);
-  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(0.3, "rgba(0,0,0,0.1)"); g.addColorStop(0.7, "rgba(0,0,0,0.55)"); g.addColorStop(1, "rgba(0,0,0,0.85)");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  if (GFX.canSprite) {
+    if (!darkSprite) {
+      const N = 256; darkSprite = makeCanvas(N, N);
+      const g = darkSprite.getContext("2d"), gr = g.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+      gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(0.3, "rgba(0,0,0,0.1)"); gr.addColorStop(0.7, "rgba(0,0,0,0.55)"); gr.addColorStop(1, "rgba(0,0,0,0.85)");
+      g.fillStyle = gr; g.fillRect(0, 0, N, N);
+    }
+    ctx.drawImage(darkSprite, lamp[0] - R, lamp[1] - R, R * 2, R * 2);
+    // outside the sprite square it's fully dark (only happens on very wide screens)
+    ctx.fillStyle = "rgba(0,0,0,0.85)";
+    if (lamp[0] - R > 0) ctx.fillRect(0, 0, lamp[0] - R, H);
+    if (lamp[0] + R < W) ctx.fillRect(lamp[0] + R, 0, W - lamp[0] - R, H);
+  } else {
+    const g = ctx.createRadialGradient(lamp[0], lamp[1], 0, lamp[0], lamp[1], R);
+    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(0.3, "rgba(0,0,0,0.1)"); g.addColorStop(0.7, "rgba(0,0,0,0.55)"); g.addColorStop(1, "rgba(0,0,0,0.85)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
   glow(lamp[0], lamp[1], 380 * flick, CAVE_PAL[L].amb, 1);
   glow(lamp[0], lamp[1], 140 * flick, "rgba(255,230,170,0.22)", 1);
   if (rush > 0) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = `rgba(255,190,40,${0.10 * rush + Math.sin(t * 6) * 0.03 * rush})`; ctx.fillRect(0, 0, W, H); ctx.restore(); }
@@ -1077,17 +1203,27 @@ function drawLighting(L, lamp, t, lay, rush) {
 
 // ---------- particles ----------
 const parts = [];
+const partPool = [];       // finished particles wait here to be reused (less garbage for the browser to clean up)
 const motes = [];
-function addPart(p) { if (parts.length < 600) parts.push(p); }
+function partCap() { return GFX.low ? 160 : 360; }
+function addPart(p) {
+  if (parts.length >= partCap()) { const old = parts[0]; parts[0] = parts[parts.length - 1]; parts.pop(); partPool.push(old); }   // full: drop an old one
+  const q = partPool.pop() || {};
+  for (const k in q) delete q[k];
+  Object.assign(q, p);
+  parts.push(q);
+}
 function burstChips(x, y, n, pal, power = 1) {
+  if (GFX.low) n = Math.ceil(n / 2);
   for (let i = 0; i < n; i++) {
     const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6;
     const sp = (3 + Math.random() * 6) * power;
     addPart({ k: "chip", x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 3 + Math.random() * 6 * power, rot: Math.random() * TAU, vr: (Math.random() - 0.5) * 0.5, c: Math.random() < 0.5 ? pal.body : pal.light, life: 0, max: 40 + Math.random() * 30 });
   }
-  for (let i = 0; i < n / 2; i++) addPart({ k: "dust", x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 20, vx: (Math.random() - 0.5) * 1.5, vy: -Math.random() * 1.2, r: 8 + Math.random() * 12, life: 0, max: 30 + Math.random() * 20, c: "rgba(180,170,160," });
+  for (let i = 0; i < n / 2; i++) addPart({ k: "dust", x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 20, vx: (Math.random() - 0.5) * 1.5, vy: -Math.random() * 1.2, r: 8 + Math.random() * 12, life: 0, max: 30 + Math.random() * 20, c: "rgb(180,170,160)" });
 }
 function burstSparks(x, y, n, color, speed = 6) {
+  if (GFX.low) n = Math.ceil(n / 2);
   for (let i = 0; i < n; i++) { const a = Math.random() * TAU, s = speed * (0.4 + Math.random()); addPart({ k: "spark", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0, max: 18 + Math.random() * 18, c: color }); }
 }
 function floatText(x, y, text, color, size = 20) { addPart({ k: "text", x, y, vy: -1.6, text, c: color, size, life: 0, max: 50 }); }
@@ -1100,21 +1236,57 @@ function updateParts(ground) {
     else if (p.k === "ember") { p.x += p.vx + Math.sin(p.life * 0.1) * 0.3; p.y += p.vy; }
     else if (p.k === "text") { p.y += p.vy; p.vy *= 0.97; }
     else if (p.k === "confetti") { p.vy += 0.12; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.rot += p.vr; }
-    if (p.life >= p.max) parts.splice(i, 1);
+    if (p.life >= p.max) { parts[i] = parts[parts.length - 1]; parts.pop(); partPool.push(p); }   // swap-remove: no shifting the whole list
   }
 }
+// a rock chip is always the same little shape: draw it once per colour
+const chipSprites = new Map();
+function chipSprite(color) {
+  let e = chipSprites.get(color);
+  if (e) return e;
+  const ds = devScale(), R = 10, S2 = Math.ceil(R * 2.6 * ds) + 2;
+  const c = makeCanvas(S2, S2);
+  paintInto(c, () => {
+    ctx.setTransform(ds, 0, 0, ds, S2 / 2, S2 / 2);
+    ctx.beginPath(); ctx.moveTo(-R, -R * 0.6); ctx.lineTo(R * 0.8, -R * 0.8); ctx.lineTo(R, R * 0.5); ctx.lineTo(-R * 0.5, R * 0.8); ctx.closePath();
+    ctx.fillStyle = color; ctx.fill(); ctx.lineWidth = 2 * 10 / 6; ctx.strokeStyle = INK; ctx.lineJoin = "round"; ctx.stroke();
+  });
+  e = { c, half: S2 / 2 / ds, size: S2 / ds };
+  chipSprites.set(color, e);
+  return e;
+}
+const sparkBatch = new Map();
 function drawParts() {
+  // sparks + embers: one path per colour and brightness level instead of one per spark
+  sparkBatch.clear();
+  for (const p of parts) {
+    if (p.k !== "spark" && p.k !== "ember") continue;
+    const f = 1 - p.life / p.max, lvl = Math.min(3, Math.floor(f * 4));
+    const key = p.c + "|" + lvl + "|" + p.k;
+    let arr = sparkBatch.get(key); if (!arr) sparkBatch.set(key, arr = []);
+    arr.push(p);
+  }
+  if (sparkBatch.size) {
+    ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round";
+    for (const [key, arr] of sparkBatch) {
+      const [c, lvl, k] = key.split("|");
+      ctx.globalAlpha = (+lvl + 0.5) / 4; ctx.strokeStyle = c; ctx.lineWidth = k === "ember" ? 3 : 2.5;
+      ctx.beginPath();
+      for (const p of arr) { ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 2, p.y - p.vy * 2 - (p.k === "ember" ? 2 : 0)); }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   for (const p of parts) {
     const f = 1 - p.life / p.max;
     if (p.k === "chip") {
+      const e = GFX.canSprite ? chipSprite(p.c) : null, k = p.r / 10;
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.globalAlpha = Math.min(1, f * 3);
-      ctx.beginPath(); ctx.moveTo(-p.r, -p.r * 0.6); ctx.lineTo(p.r * 0.8, -p.r * 0.8); ctx.lineTo(p.r, p.r * 0.5); ctx.lineTo(-p.r * 0.5, p.r * 0.8); ctx.closePath();
-      ctx.fillStyle = p.c; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = INK; ctx.stroke(); ctx.restore();
+      if (e) ctx.drawImage(e.c, -e.half * k, -e.half * k, e.size * k, e.size * k);
+      else { ctx.beginPath(); ctx.moveTo(-p.r, -p.r * 0.6); ctx.lineTo(p.r * 0.8, -p.r * 0.8); ctx.lineTo(p.r, p.r * 0.5); ctx.lineTo(-p.r * 0.5, p.r * 0.8); ctx.closePath(); ctx.fillStyle = p.c; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = INK; ctx.stroke(); }
+      ctx.restore();
     } else if (p.k === "dust") {
-      ctx.fillStyle = p.c + (0.25 * f) + ")"; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
-    } else if (p.k === "spark" || p.k === "ember") {
-      ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = f; ctx.strokeStyle = p.c; ctx.lineWidth = p.k === "ember" ? 3 : 2.5; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 2, p.y - p.vy * 2 - (p.k === "ember" ? 2 : 0)); ctx.stroke(); ctx.restore();
+      ctx.globalAlpha = 0.25 * f; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill(); ctx.globalAlpha = 1;
     } else if (p.k === "text") {
       ctx.save(); ctx.globalAlpha = Math.min(1, f * 2.5); label(p.text, p.x, p.y, p.size, p.c, "center"); ctx.restore();
     } else if (p.k === "confetti") {
@@ -1123,7 +1295,9 @@ function drawParts() {
   }
 }
 function updateMotes(lay, L) {
-  while (motes.length < 55) motes.push({ x: Math.random() * lay.W, y: lay.hud + Math.random() * (lay.ground - lay.hud), vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.2, s: 1 + Math.random() * 2, ph: Math.random() * TAU });
+  const want = GFX.low ? 20 : 55;
+  if (motes.length > want) motes.length = want;
+  while (motes.length < want) motes.push({ x: Math.random() * lay.W, y: lay.hud + Math.random() * (lay.ground - lay.hud), vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.2, s: 1 + Math.random() * 2, ph: Math.random() * TAU });
   for (const m of motes) {
     m.x += m.vx + Math.sin(m.ph += 0.01) * 0.15; m.y += m.vy + (L === 2 || L === 4 ? -0.5 : 0);
     if (m.x < -10) m.x = lay.W + 10; if (m.x > lay.W + 10) m.x = -10;
@@ -1133,9 +1307,15 @@ function updateMotes(lay, L) {
 function drawMotes(lamp, L) {
   ctx.save(); ctx.globalCompositeOperation = "lighter";
   const col = L === 2 || L === 4 ? [255, 150, 60] : L === 3 ? [200, 150, 255] : L === 1 ? [170, 210, 255] : [255, 230, 190];
-  for (const m of motes) {
-    const d = Math.hypot(m.x - lamp[0], m.y - lamp[1]), a = clamp(1 - d / 600, 0.08, 1) * (0.5 + 0.5 * Math.sin(m.ph * 3));
-    ctx.fillStyle = rgb(col, a * 0.8); ctx.beginPath(); ctx.arc(m.x, m.y, m.s, 0, TAU); ctx.fill();
+  ctx.fillStyle = rgb(col, 1);
+  for (let lvl = 0; lvl < 4; lvl++) {
+    ctx.globalAlpha = (lvl + 0.5) / 4 * 0.8; ctx.beginPath();
+    for (const m of motes) {
+      const d = Math.hypot(m.x - lamp[0], m.y - lamp[1]), a = clamp(1 - d / 600, 0.08, 1) * (0.5 + 0.5 * Math.sin(m.ph * 3));
+      if (Math.min(3, Math.floor(a * 4)) !== lvl) continue;
+      ctx.moveTo(m.x + m.s, m.y); ctx.arc(m.x, m.y, m.s, 0, TAU);
+    }
+    ctx.fill();
   }
   ctx.restore();
 }
@@ -1152,7 +1332,7 @@ const SOUND_FILES = {
   cobble: "rock_two-large-cobblestone-blocks-35760.wav",
   hitRock: "rock_hit-rock-03-266305.mp3",
 };
-const settings = { music: 0.55, sfx: 0.8, muted: false, shake: true };
+const settings = { music: 0.55, sfx: 0.8, muted: false, shake: true, gfx: "auto", fps: false };
 const his = {};
 for (const k in SOUND_FILES) { try { const a = new Audio("assets/" + SOUND_FILES[k]); a.preload = "auto"; his[k] = a; } catch (e) {} }
 function playHis(name, vol = 1) {
@@ -1323,6 +1503,8 @@ function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } cat
 function loadSettings() { try { const d = JSON.parse(localStorage.getItem(SET_KEY) || "{}"); for (const k in settings) if (typeof d[k] === typeof settings[k] && (typeof d[k] !== "number" || isFinite(d[k]))) settings[k] = d[k]; settings.music = clamp(settings.music, 0, 1); settings.sfx = clamp(settings.sfx, 0, 1); } catch (e) {} }
 function saveSettings() { try { localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch (e) {} }
 loadSettings();
+if (settings.gfx !== "auto" && settings.gfx !== "high" && settings.gfx !== "low") settings.gfx = "auto";
+GFX.low = settings.gfx === "low";
 let S = loadSave();
 const hasProgress = () => S.rocks > 0 || S.gold > 0;
 
@@ -1334,12 +1516,13 @@ const canvas = document.getElementById("c");
 ctx = canvas.getContext("2d");
 let W = 1280, H = 720, scale = 1, dpr = 1;
 function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  dpr = Math.min(window.devicePixelRatio || 1, GFX.low ? 1 : 1.5);   // sharper than 1.5 costs a lot and looks the same
   const vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
   scale = Math.min(vh / 720, vw / 1000);
   W = vw / scale; H = vh / scale;
   canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
   canvas.style.width = vw + "px"; canvas.style.height = vh + "px";
+  clearSprites();   // sprites were drawn for the old size
 }
 window.addEventListener("resize", resize);
 resize();
@@ -1401,6 +1584,7 @@ window.addEventListener("keydown", e => {
   initAudio();
   if (e.code === "Space") { spaceDown = true; e.preventDefault(); }
   if (e.key === "m" || e.key === "M") toggleMute();
+  if (e.key === "F3") { settings.fps = !settings.fps; saveSettings(); e.preventDefault(); }
   if (e.key === "Escape" && ui.modal && ui.modal !== "ending") { closeModal(); return; }
   if (screen !== "game") return;
   if (e.key === "Escape") { if (ui.shop) ui.shop = false; else if (!ui.modal) goTitle(); }
@@ -2288,13 +2472,18 @@ function dragSlider() {
   if (ui.drag === "sfx" && T - lastSliderClick > 4) { lastSliderClick = T; SFX.click(); }
 }
 function drawSound() {
-  const f = modalFrame(520, 470, "SOUND");
+  const f = modalFrame(520, 530, "SOUND");
   slider("music", f.x + 40, f.y + 120, f.w - 80, "Music");
   slider("sfx", f.x + 40, f.y + 200, f.w - 80, "Effects");
   button("mute", f.x + 40, f.y + 240, (f.w - 100) / 2, 52, settings.muted ? "Unmute" : "Mute all", { icon: settings.muted ? "sound" : "mute", onClick: () => { toggleMute(); } });
   button("shk", f.x + f.w / 2 + 10, f.y + 240, (f.w - 100) / 2, 52, settings.shake ? "Shake: ON" : "Shake: OFF", { onClick: () => { settings.shake = !settings.shake; saveSettings(); SFX.click(); } });
-  const lines = ["Rock breaking sound: LordSonny (Pixabay)", "Pickaxe sound: CreatorsHome", "Game, minerals and ideas: Sixten (made in Scratch first)", "Keys: hold Space to mine · S shop · I index · M mute · Esc menu"];
-  lines.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 340 + i * 26, fitSize(l, 15, f.w - 30, FONT_B), i === 3 ? "#9a8c7c" : "#cbbca8", "center", FONT_B, false));
+  const GQ = { auto: "Graphics: Auto", high: "Graphics: High", low: "Graphics: Low" };
+  button("gfx", f.x + 40, f.y + 306, f.w - 80, 52, GQ[settings.gfx] || GQ.auto, { onClick: () => {
+    settings.gfx = settings.gfx === "auto" ? "high" : settings.gfx === "high" ? "low" : "auto";
+    setQuality(settings.gfx === "low"); perf.slow = 0; saveSettings(); SFX.click();
+  } });
+  const lines = ["Rock breaking sound: LordSonny (Pixabay)", "Pickaxe sound: CreatorsHome", "Game, minerals and ideas: Sixten (made in Scratch first)", "Keys: hold Space to mine \u00b7 S shop \u00b7 I index \u00b7 M mute \u00b7 F3 FPS \u00b7 Esc menu"];
+  lines.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 400 + i * 26, fitSize(l, 15, f.w - 30, FONT_B), i === 3 ? "#9a8c7c" : "#cbbca8", "center", FONT_B, false));
 }
 function drawConfirm() {
   const c = ui.confirm; if (!c) { ui.modal = null; return; }
@@ -2399,6 +2588,7 @@ function drawWorld(t) {
   for (const b of falling) {
     const bx = fx(b), hov = Math.hypot(mouse.x - bx, mouse.y - b.y) < b.r * 1.3 && !regionAt(mouse.x, mouse.y);
     if (b.kind === "meteor") drawMeteor(bx, b.y, b.r, b.vx, b.vy, t, !!b.landed);
+    else if (GFX.canSprite) drawRockSprite(bx, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, b.rot);
     else drawRock(bx, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, 0, { rot: b.rot });
     if (hov) { ctx.beginPath(); ctx.arc(bx, b.y, b.r * 1.25, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,220,120,0.85)"; ctx.stroke(); }
   }
@@ -2416,7 +2606,7 @@ function drawWorld(t) {
     const a = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
     ctx.save(); ctx.globalAlpha = a;
     glow(x, y, sz * (2.2 + tier * 0.25), rarityGlowColor(m.rarity, t), 0.5 + tier * 0.04);
-    if (tier >= 5) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.translate(x, y); ctx.rotate(t * 0.8); ctx.fillStyle = rarityGlowColor(m.rarity, t); ctx.globalAlpha = a * 0.18; for (let i = 0; i < 8; i++) { ctx.rotate(TAU / 8); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sz * 0.3, sz * 4); ctx.lineTo(sz * 0.3, sz * 4); ctx.fill(); } ctx.restore(); }
+    if (tier >= 5 && !GFX.low) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.translate(x, y); ctx.rotate(t * 0.8); ctx.fillStyle = rarityGlowColor(m.rarity, t); ctx.globalAlpha = a * 0.18; for (let i = 0; i < 8; i++) { ctx.rotate(TAU / 8); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sz * 0.3, sz * 4); ctx.lineTo(sz * 0.3, sz * 4); ctx.fill(); } ctx.restore(); }
     drawMineral(m, x, y, sz, { t });
     if (tier >= 2) for (let i = 0; i < Math.min(8, tier + 1); i++) star(x + Math.cos(t * 2 + i * 2.4) * sz * 1.5, y + Math.sin(t * 2.6 + i * 1.7) * sz * 1.2, sz * 0.18 * (0.5 + 0.5 * Math.sin(t * 9 + i)), "#ffffff");
     label("+" + fmt(f.gained), x, y + sz * 0.9 + 26, 24, "#ffd447", "center");
@@ -2502,7 +2692,30 @@ function goTitle() { save(); ui.fadeTo = 1; setTimeout(() => { screen = "title";
 // 12. MAIN LOOP
 // =====================================================================
 let last = performance.now(), acc = 0;
+// frame timing for the F3 counter and the automatic quality switch
+const perf = { fps: 60, ms: 0, ema: 16.7, slow: 0 };
+function setQuality(low) {
+  if (GFX.low === low) return;
+  GFX.low = low; clearSprites(); resize();
+}
+function watchSpeed(dt) {
+  if (dt <= 0 || dt > 200) return;           // tab was hidden: ignore
+  perf.ema += (dt - perf.ema) * 0.05;
+  perf.fps += (1000 / dt - perf.fps) * 0.05;
+  if (settings.gfx === "auto" && !GFX.low && screen === "game") {
+    perf.slow = perf.ema > 24 ? perf.slow + 1 : 0;   // slower than ~40 FPS ...
+    if (perf.slow > 150) { setQuality(true); ui.toasts.push({ title: "GRAPHICS", name: "Low quality (faster)", icon: "trophy", t: 0 }); }   // ... for about 3 seconds
+  }
+}
+function drawFPS() {
+  const txt = `${Math.round(perf.fps)} FPS  \u00b7  ${perf.ms.toFixed(1)} ms  \u00b7  DPR ${dpr}  \u00b7  ${GFX.low ? "LOW" : "HIGH"}  \u00b7  ${parts.length} parts`;
+  const w = textW(txt, 13, FONT_B) + 16;
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(8, lay.hud + 2, w, 22);
+  label(txt, 16, lay.hud + 18, 13, perf.fps < 40 ? "#ff8a6a" : "#7dff6a", "left", FONT_B, false);
+}
 function frame(now) {
+  const t0 = performance.now();
+  watchSpeed(now - last);
   acc += Math.min(0.25, Math.max(0, (now - last) / 1000)); last = now;
   computeLayout();
   while (acc >= DT) { acc -= DT; tick(); }
@@ -2547,6 +2760,8 @@ function frame(now) {
   if (dark > 0.005) { ctx.fillStyle = `rgba(0,0,0,${clamp(dark, 0, 1)})`; ctx.fillRect(0, 0, W, H); }
   const r = regionAt(mouse.x, mouse.y);
   hoverId = r && r.fn ? r.id : null;
+  if (settings.fps) drawFPS();
+  perf.ms += (performance.now() - t0 - perf.ms) * 0.1;
   canvas.style.cursor = hoverId ? "pointer" : (screen === "game" && !ui.modal && (overRock() || falling.some(b => Math.hypot(mouse.x - fx(b), mouse.y - b.y) < b.r * 1.3)) ? "crosshair" : "default");
   requestAnimationFrame(frame);
 }
