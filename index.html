@@ -1354,9 +1354,13 @@ function computeLayout() {
   lay.rockY = core ? lay.ground - lay.R * 1.25 : lay.ground - lay.R * 0.93;
   lay.minerX = lay.rockX - lay.R - 92 * lay.s;
   lay.lamp = [lay.minerX + 18 * lay.s, lay.ground - 148 * lay.s];
-  lay.drillX = lay.rockX + lay.R + 28 * lay.s;
   lay.miniX = i => lay.rockX + lay.R * 0.72 + i * 34 * lay.s;
-  lay.policeX = Math.min(W - 70 * lay.s, lay.rockX + lay.R + (110 + 34 * S.helper + (S.drill ? 40 : 0)) * lay.s);
+  // the drill stands to the right of the mini miners, so they never overlap
+  lay.drillX = Math.max(lay.rockX + lay.R + 28 * lay.s, S.helper > 0 ? lay.miniX(S.helper - 1) + 36 * lay.s : 0);
+  const busyRight = S.drill > 0 && !core ? lay.drillX + 70 * lay.s : S.helper > 0 ? lay.miniX(S.helper - 1) + 30 * lay.s : lay.rockX + lay.R + 20 * lay.s;
+  const rightSpot = busyRight + 50 * lay.s;
+  if (rightSpot < W - 50 * lay.s) { lay.policeX = rightSpot; lay.policeSide = 1; }
+  else { lay.policeX = Math.max(lay.sceneL + 50 * lay.s, lay.minerX - 150 * lay.s); lay.policeSide = -1; }   // no room on the right: stand behind the miner
   // bottom bar: shop button on the left, dock buttons on the right, event bars in between
   lay.dockN = 2 + (S.police ? 1 : 0) + (S.rebirths > 0 || S.stars > 0 ? 1 : 0);
   lay.dockL = W - 14 - lay.dockN * 64 + 10;
@@ -1442,7 +1446,7 @@ function maxTierFound() { let t = -1; S.found.forEach((n, i) => { if (n > 0) t =
 function shake(n) { if (settings.shake) game.shake = Math.max(game.shake, n); }
 function incomePerSec() { const h = game.incomeHist; const v = h.length > 1 ? (h[h.length - 1] - h[0]) / (h.length - 1) : 0; return isFinite(v) && v > 0 ? v : 0; }
 function eventSecs(base) { return base * (1 + 0.25 * eventBoost(S)); }
-function curHP() { return rockHP(S, rock.boss); }
+function curHP() { return rockHP(S, rock.boss && !!BOSSES[S.layer]); }
 
 // ---------- mining ----------
 function playerHit() {
@@ -1488,17 +1492,33 @@ function breakIt() {
   const id = breakRock(S, rand, { rush: ev.rush > 0, vein: ev.vein > 0 });
   if (ev.vein > 0) { ev.vein--; if (ev.vein === 0) linger("CRYSTAL VEIN", 0, "#4dc3ff"); }
   if (police.quota) police.quota.got++;
-  popMineral(id, lay.rockX, payout(S, id, ev.rush > 0));
+  popMineral(id, null, payout(S, id, ev.rush > 0));
   burstChips(lay.rockX, lay.rockY, 18, ROCK_PAL[S.layer], 1.4);
   rock.pause = rock.pauseMax = BREAK_PAUSE_TICKS;
   anims.goldbump = 1;
 }
-function popMineral(id, x, gained, delay = 0) {
+// x = offset from the rock (null = pick a free lane above the rock)
+function popMineral(id, x, gained, delay = 0, y0) {
   const m = MINERALS[id], tier = tierOf(m.rarity), isNew = S.found[id] === 1;
-  floaters.push({ id, x, life: -delay, max: 20 + tier * 7, gained, isNew });
+  if (x === null) {
+    const lane = lay.R * 1.25 / lay.s, busy = f => f.life < f.max * 0.65;
+    let best = null, bestAge = -1;
+    for (const k of [0, -1, 1, -2, 2]) {
+      const lx = k * lane, ax = lay.rockX + lx * lay.s;
+      if (ax < lay.sceneL + 80 || ax > W - 80) continue;
+      const inLane = floaters.filter(f => Math.abs(f.x - lx) < lane * 0.8);
+      if (!inLane.some(busy)) { best = lx; break; }
+      const age = Math.min(...inLane.map(f => f.life / f.max));
+      if (age > bestAge) { bestAge = age; best = lx; }
+    }
+    x = best === null ? 0 : best;
+    // anything still in that lane starts fading now, so two never sit on top of each other
+    for (const f of floaters) if (Math.abs(f.x - x) < lane * 0.8 && f.life < f.max * 0.65) f.life = Math.max(f.life, Math.ceil(f.max * 0.65));
+  }
+  floaters.push({ id, x, y0, life: -delay, max: 20 + tier * 7, gained, isNew });
   shake(Math.min(12, 6 + tier));
   SFX.find(tier);
-  if (tier >= 2) burstSparks(x, lay.rockY - lay.R, 6 + tier * 4, rarityGlowColor(m.rarity, T / 30), 5 + tier);
+  if (tier >= 2) burstSparks(lay.rockX + x * lay.s, y0 || lay.rockY - lay.R, 6 + tier * 4, rarityGlowColor(m.rarity, T / 30), 5 + tier);
   const big = bigMoment(m);
   if ((big || (isNew && tier >= 5)) && T - game.lastShineT > 45) { playHis("shine", 0.7); game.lastShineT = T; }
   if ((big || isNew) && T - game.lastFlashT > 50) {
@@ -1512,7 +1532,7 @@ function bossKill() {
   stopHis(); playHis("rockBreak"); playHis("cobble"); SFX.boom(); SFX.levelUp();
   const ids = bossLoot(S, rand);
   S.bossActive = -1;
-  ids.forEach((id, i) => popMineral(id, lay.rockX + (i - 2) * lay.R * 0.45, payout(S, id, false), i * 6));
+  ids.forEach((id, i) => popMineral(id, (i - 2) * Math.min(lay.R * 0.9, (W - lay.sceneL - 160) / 5) / lay.s, payout(S, id, false), i * 6));
   burstChips(lay.rockX, lay.rockY, 40, ROCK_PAL[L], 2);
   burstSparks(lay.rockX, lay.rockY, 40, "#ffd060", 10);
   shake(16);
@@ -1533,7 +1553,7 @@ function coreBreak() {
   burstSparks(lay.rockX, lay.rockY, 120, "#ffd060", 14);
   burstChips(lay.rockX, lay.rockY, 40, { body: "#5a3a2c", light: "#8a5a3a" }, 2.2);
   confetti(160);
-  floaters.push({ id: CORE_MINERAL, x: lay.rockX, life: 0, max: 140, gained: payout(S, CORE_MINERAL, false), isNew: true });
+  floaters.push({ id: CORE_MINERAL, x: 0, life: 0, max: 140, gained: payout(S, CORE_MINERAL, false), isNew: true });
   save();
   ui.pendingEnding = 30 * 2.2;
 }
@@ -1611,6 +1631,19 @@ function goLayer(L, announce) { if (ui.trans) return; ui.trans = { t: 0, to: L, 
 // ---------- events ----------
 function banner(title, sub, color, dur = 90, icon) { ui.banner = { title, sub, color, t: 0, max: dur, icon }; }
 function linger(text, f, color) { ui.linger.push({ text, f, color, t: 30 }); }
+// x of a free landing spot (relative to the rock), or null if the floor is full
+function freeSpot(r) {
+  const spots = [];
+  for (let x = lay.sceneL + r + 24; x <= W - r - 24; x += r * 0.7) {
+    if (Math.abs(x - lay.rockX) < lay.rockR * 1.5 * 1.1 + r) continue;           // the rock (even a boss rock)
+    const minerFar = lay.rockX - lay.rockR * 1.3 - 92 * lay.s;                     // where the miner stands next to a boss rock
+    if (x > minerFar - 70 * lay.s - r && x < lay.minerX + 70 * lay.s + r) continue;   // the miner (both places)
+    if (falling.some(b => Math.abs(x - fx(b, true)) < r + b.r + 10)) continue;   // other rocks
+    spots.push((x - lay.rockX) / lay.s);
+  }
+  return spots.length ? spots[Math.floor(rand() * spots.length)] : null;
+}
+const fx = (b, target) => lay.rockX + (target && b.target !== undefined ? b.target : b.x) * lay.s;   // where a falling thing is on screen
 function startEvent(force) {
   const opts = ["rush", "cavein", "vein", "meteor", "frenzy"];
   if (S.police && S.speed >= 3 && police.state === "off" && !LAYERS[S.layer].core) opts.push("quota", "quota");
@@ -1624,34 +1657,47 @@ function startEvent(force) {
     SFX.rumble(); playHis("cobble"); shake(14);
     banner("CAVE-IN!", "Click the falling rocks to smash them!", "#ff7a4a", 100, "cavein");
     const n = randInt(5, 8);
-    for (let i = 0; i < n; i++) falling.push({ kind: "rock", x: lay.sceneL + 60 + rand() * (W - lay.sceneL - 120), y: lay.hud - 60 - rand() * 400, vx: 0, vy: 0, r: (24 + rand() * 14) * lay.s * 1.2, shape: rockShape(randInt(1, 1e9)), rot: rand() * TAU, vr: (rand() - 0.5) * 0.1, landed: 0 });
+    for (let i = 0; i < n; i++) {
+      const r = (24 + rand() * 14) * lay.s * 1.2, x = freeSpot(r);
+      if (x === null) break;
+      falling.push({ kind: "rock", x, target: x, y: lay.hud - 60 - rand() * 400, vx: 0, vy: 0, r, shape: rockShape(randInt(1, 1e9)), rot: rand() * TAU, vr: (rand() - 0.5) * 0.1, landed: 0 });
+    }
   }
   if (e === "meteor") {
     SFX.whoosh();
     banner("METEOR SHOWER!", "Click the meteors for rare minerals!", "#ff9a3a", 100, "meteor");
     const n = randInt(3, 5);
-    for (let i = 0; i < n; i++) falling.push({ kind: "meteor", x: lay.sceneL + 200 + rand() * (W - lay.sceneL), y: lay.hud - 80 - i * 160 - rand() * 80, vx: -3 - rand() * 2, vy: 4, r: 20 * lay.s * 1.2, landed: 0 });
+    for (let i = 0; i < n; i++) {
+      const r = 20 * lay.s * 1.2, target = freeSpot(r);
+      if (target === null) break;
+      // work out how many ticks the fall takes, then pick vx so it lands exactly on its spot
+      const y0 = lay.hud - 80 - i * 160 - rand() * 80;
+      let y = y0, vy = 4, n2 = 0; while (y < lay.ground - r && n2 < 2000) { y += vy; vy += 0.15; n2++; }
+      const dx = (160 + rand() * 200) / lay.s;
+      falling.push({ kind: "meteor", x: target + dx, target, y: y0, vx: -dx / Math.max(1, n2), vy: 4, r, landed: 0 });
+    }
   }
   if (e === "quota") startPolice("quota");
 }
 function scenePress() {
   for (let i = falling.length - 1; i >= 0; i--) {
     const b = falling[i];
-    if (Math.hypot(mouse.x - b.x, mouse.y - b.y) > b.r * 1.3) continue;
+    const bx = fx(b);
+    if (Math.hypot(mouse.x - bx, mouse.y - b.y) > b.r * 1.3) continue;
     falling.splice(i, 1);
     mouse.ui = true;
     if (b.kind === "meteor") {
       SFX.boom(); playHis("punch", 0.6);
-      burstSparks(b.x, b.y, 30, "#ffb040", 8);
+      burstSparks(bx, b.y, 30, "#ffb040", 8);
       const L = Math.min(S.layer, 3), id = rollMineral(L, luckRolls(S) + 3, rand), g = payout(S, id, ev.rush > 0) * 3;
       addGold(S, g); noteFind(S, id); S.meteors++;
-      popMineral(id, b.x, g);
+      popMineral(id, (bx - lay.rockX) / lay.s, g, 0, b.y);
     } else {
       playHis("punch", 0.8); SFX.boom();
-      burstChips(b.x, b.y, 14, ROCK_PAL[Math.min(S.layer, 3)], 1.1);
+      burstChips(bx, b.y, 14, ROCK_PAL[Math.min(S.layer, 3)], 1.1);
       const g = payout(S, rollMineral(Math.min(S.layer, 3), luckRolls(S), rand), ev.rush > 0) * 2;
       addGold(S, g); S.boulders++;
-      floatText(b.x, b.y - b.r, "+" + fmt(g), "#ffcc33", 22);
+      floatText(bx, b.y - b.r, "+" + fmt(g), "#ffcc33", 22);
     }
     return;
   }
@@ -1660,7 +1706,7 @@ function scenePress() {
 // ---------- the Rock police ----------
 const INTRO = [["you", "Huh?!"], ["you", "You startled me a bit there..."], ["you", "And who are you??"], ["police", "I am the Rock police."]];
 function startPolice(purpose) {
-  police.state = "in"; police.purpose = purpose; police.x = W + 80; police.walk = 0;
+  police.state = "in"; police.purpose = purpose; police.side = lay.policeSide; police.x = police.side > 0 ? W + 80 : lay.sceneL - 80; police.walk = 0;
   if (purpose !== "intro") SFX.whistle();
 }
 function say(lines, onDone) { ui.dialog = { lines, i: 0, ch: 0, idle: 0, onDone }; anims.dlgA = 0; }
@@ -1859,22 +1905,22 @@ function tick() {
   if (quiet && --ev.next <= 0) { ev.next = Math.round(30 * randInt(70, 140) / (1 + 0.15 * eventBoost(S))); startEvent(); }
   for (let i = falling.length - 1; i >= 0; i--) {
     const b = falling[i];
-    if (b.landed) { if (++b.landed > 30 * 9) { if (b.kind === "rock") burstChips(b.x, b.y, 6, ROCK_PAL[0], 0.6); else burstSparks(b.x, b.y, 8, "#ff8a2a", 3); falling.splice(i, 1); } continue; }
-    if (b.kind === "meteor") { b.x += b.vx; b.y += b.vy; b.vy += 0.15; if (T % 2 === 0) addPart({ k: "ember", x: b.x, y: b.y, vx: -b.vx * 0.2, vy: -1, c: "#ffb040", life: 0, max: 25 }); }
+    if (b.landed) { if (++b.landed > 30 * 9) { if (b.kind === "rock") burstChips(fx(b), b.y, 6, ROCK_PAL[0], 0.6); else burstSparks(fx(b), b.y, 8, "#ff8a2a", 3); falling.splice(i, 1); } continue; }
+    if (b.kind === "meteor") { b.x += b.vx; b.y += b.vy; b.vy += 0.15; if (T % 2 === 0) addPart({ k: "ember", x: fx(b), y: b.y, vx: -b.vx * 0.2, vy: -1, c: "#ffb040", life: 0, max: 25 }); }
     else { b.vy += 0.5; b.y += b.vy; b.rot += b.vr; }
     if (b.y >= lay.ground - b.r) {
       b.y = lay.ground - b.r;
-      if (b.kind === "meteor") { b.landed = 1; shake(6); burstSparks(b.x, b.y + b.r, 16, "#ffb040", 6); SFX.boom(); }
-      else if (b.vy > 4) { b.vy *= -0.3; shake(4); burstChips(b.x, b.y + b.r, 4, ROCK_PAL[0], 0.6); playHis("punch", 0.3); }
+      if (b.kind === "meteor") { b.landed = 1; b.x = b.target; shake(6); burstSparks(fx(b), b.y + b.r, 16, "#ffb040", 6); SFX.boom(); }
+      else if (b.vy > 4) { b.vy *= -0.3; shake(4); burstChips(fx(b), b.y + b.r, 4, ROCK_PAL[0], 0.6); playHis("punch", 0.3); }
       else b.landed = 1;
     }
   }
 
   // Rock police: first visit after a random 1-10 seconds (his Player2 wait)
   if (!S.police && police.state === "off" && S.time > introAt && !ui.modal && !ui.trans) startPolice("intro");
-  if (police.state === "in") { police.walk += 0.25; police.x -= 6 * lay.s; if (police.x <= lay.policeX) { police.x = lay.policeX; police.state = "stand"; policeArrived(); } }
-  else if (police.state === "stand") { police.x = lay.policeX; }
-  else if (police.state === "out") { police.walk += 0.25; police.x += 7 * lay.s; if (police.x > W + 100) police.state = "off"; }
+  if (police.state === "in") { police.walk += 0.25; police.x -= 6 * lay.s * police.side; if ((police.x - lay.policeX) * police.side <= 0) { police.x = lay.policeX; police.state = "stand"; policeArrived(); } }
+  else if (police.state === "stand") { police.x = lay.policeX; police.side = lay.policeSide; }
+  else if (police.state === "out") { police.walk += 0.25; police.x += 7 * lay.s * police.side; if (police.x > W + 100 || police.x < -100) police.state = "off"; }
   quotaTick();
   if (ui.dialog) { const d = ui.dialog, line = d.lines[d.i][1]; if (d.ch < line.length) d.ch += 1.4; else if (++d.idle > 30 * 3.5) nextLine(); }
   if (ui.pendingEnding > 0 && --ui.pendingEnding <= 0) startPolice("ending");
@@ -2007,7 +2053,7 @@ function drawBars() {
   if (ev.frenzy > 0) list.push({ text: "PICKAXE FRENZY x2", f: ev.frenzy / ev.frenzyMax, color: "#ff8a2a" });
   if (ev.vein > 0) list.push({ text: `CRYSTAL VEIN: ${ev.vein} lucky rocks`, f: ev.vein / ev.veinMax, color: "#4dc3ff" });
   if (police.quota) list.push({ text: `INSPECTION: ${police.quota.got} / ${police.quota.need}   ${Math.ceil(police.quota.t / 30)}s`, f: police.quota.got / police.quota.need, color: "#9ab0ff" });
-  if (rock.boss && !ui.trans) list.push({ text: `${BOSSES[S.layer].name}: ${fmt(curHP() - rock.dmg)} HP`, f: 1 - rock.dmg / curHP(), color: "#ff5a4a" });
+  if (rock.boss && BOSSES[S.layer] && !ui.trans) list.push({ text: `${BOSSES[S.layer].name}: ${fmt(curHP() - rock.dmg)} HP`, f: 1 - rock.dmg / curHP(), color: "#ff5a4a" });
   for (const l of ui.linger) list.push(Object.assign({ a: Math.min(1, l.t / 10) }, l));
   const w = lay.barsW; if (w < 120) return;
   list.slice(0, 4).forEach((b, i) => {
@@ -2293,7 +2339,7 @@ function drawToasts() {
 function drawBanner() {
   const b = ui.banner; if (!b) return;
   const k = b.t < 10 ? easeBack(b.t / 10) : b.t > b.max - 15 ? 1 - easeOut((b.t - (b.max - 15)) / 15) : 1;
-  const y = ui.dialog ? lay.hud + 250 : lay.hud + 70;
+  const y = ui.dialog ? lay.hud + 250 : ui.toasts.length ? lay.hud + 124 : lay.hud + 70;
   ctx.save(); ctx.globalAlpha = clamp(k, 0, 1); ctx.translate(lay.cx, y); ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
   label(b.title, 0, 0, fitSize(b.title, 52, W - lay.sceneL - 40), b.color, "center");
   if (b.sub) label(b.sub, 0, 32, fitSize(b.sub, 20, W - lay.sceneL - 40, FONT_B), "#ffffff", "center", FONT_B);
@@ -2332,7 +2378,7 @@ function drawWorld(t) {
     const sq = rock.squash, pop = easeBack(rock.pop), R = lay.R * rock.size * pop;
     if (rock.boss) glow(lay.rockX, lay.rockY, R * 2.2, "rgba(255,60,40,0.35)", 0.6 + 0.2 * Math.sin(t * 4));
     drawRock(lay.rockX, lay.rockY, R, ROCK_PAL[S.layer], rock.shape, rock.dmg / curHP(), { rot: rock.rot, flash: rock.flash, bright: rock.bright, sx: 1 + sq * 0.06, sy: 1 - sq * 0.06 });
-    if (rock.boss && R > 1) drawBossFace(S.layer, lay.rockX, lay.rockY, R, t, rock.hurt);
+    if (rock.boss && BOSSES[S.layer] && R > 1) drawBossFace(S.layer, lay.rockX, lay.rockY, R, t, rock.hurt);
   } else {
     // the break: the rock shows fully cracked (100%) and bursts apart
     const k = 1 - rock.pause / rock.pauseMax, R = lay.R * rock.size * (1 + k * 0.25);
@@ -2342,21 +2388,25 @@ function drawWorld(t) {
   }
   drawMiner(lay.minerX, lay.ground, s, game.swing, t, game.smear, skin);
   if (!L.core || !S.coreBroken) for (let i = 0; i < S.helper; i++) drawMiner(lay.miniX(i), lay.ground, s * 0.5, game.minis[i], t + i, game.minis[i] < 0.3 ? 1 - game.minis[i] * 3 : 0, SKINS[0], -1, false);
-  if (police.state !== "off") drawPolice(police.x, lay.ground, s, police.walk, t, -1, police.state === "stand" && !!ui.dialog);
+  if (police.state !== "off") drawPolice(police.x, lay.ground, s, police.walk, t, police.side > 0 ? -1 : 1, police.state === "stand" && !!ui.dialog);
   for (const b of falling) {
-    const hov = b.landed !== undefined && Math.hypot(mouse.x - b.x, mouse.y - b.y) < b.r * 1.3 && !regionAt(mouse.x, mouse.y);
-    if (b.kind === "meteor") drawMeteor(b.x, b.y, b.r, b.vx, b.vy, t, !!b.landed);
-    else drawRock(b.x, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, 0, { rot: b.rot });
-    if (hov) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.25, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,220,120,0.85)"; ctx.stroke(); }
+    const bx = fx(b), hov = Math.hypot(mouse.x - bx, mouse.y - b.y) < b.r * 1.3 && !regionAt(mouse.x, mouse.y);
+    if (b.kind === "meteor") drawMeteor(bx, b.y, b.r, b.vx, b.vy, t, !!b.landed);
+    else drawRock(bx, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, 0, { rot: b.rot });
+    if (hov) { ctx.beginPath(); ctx.arc(bx, b.y, b.r * 1.25, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,220,120,0.85)"; ctx.stroke(); }
   }
   // minerals floating up (his clones: up 5 per frame, fading)
   for (const f of floaters) {
     if (f.life < 0) continue;
     const m = MINERALS[f.id], tier = tierOf(m.rarity), k = f.life / f.max;
-    const x = f.x, y = lay.rockY - lay.R * 0.6 - k * 210 - (f.id === CORE_MINERAL ? 60 : 0);
-    const a = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
     const sz = lay.rockR * (0.42 + tier * 0.025) * easeBack(Math.min(1, f.life / 6)) * (f.id === CORE_MINERAL ? 2 : 1);
     if (sz <= 0.5) continue;
+    // starts just above the rock (like his clone) and rises, but stops below the HUD / dialog box
+    const x = lay.rockX + f.x * lay.s, start = f.y0 !== undefined ? f.y0 - 20 : lay.rockY - lay.R * 1.05 - sz * 0.3;
+    const full = lay.rockR * (0.42 + tier * 0.025) * (f.id === CORE_MINERAL ? 2 : 1);   // size once it has popped in
+    const top = lay.hud + 40 + (ui.dialog ? 220 : 0) + full * 1.15 + 46;
+    const y = start - k * clamp(start - top, 30, 210);
+    const a = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
     ctx.save(); ctx.globalAlpha = a;
     glow(x, y, sz * (2.2 + tier * 0.25), rarityGlowColor(m.rarity, t), 0.5 + tier * 0.04);
     if (tier >= 5) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.translate(x, y); ctx.rotate(t * 0.8); ctx.fillStyle = rarityGlowColor(m.rarity, t); ctx.globalAlpha = a * 0.18; for (let i = 0; i < 8; i++) { ctx.rotate(TAU / 8); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sz * 0.3, sz * 4); ctx.lineTo(sz * 0.3, sz * 4); ctx.fill(); } ctx.restore(); }
@@ -2490,7 +2540,7 @@ function frame(now) {
   if (dark > 0.005) { ctx.fillStyle = `rgba(0,0,0,${clamp(dark, 0, 1)})`; ctx.fillRect(0, 0, W, H); }
   const r = regionAt(mouse.x, mouse.y);
   hoverId = r && r.fn ? r.id : null;
-  canvas.style.cursor = hoverId ? "pointer" : (screen === "game" && !ui.modal && (overRock() || falling.some(b => Math.hypot(mouse.x - b.x, mouse.y - b.y) < b.r * 1.3)) ? "crosshair" : "default");
+  canvas.style.cursor = hoverId ? "pointer" : (screen === "game" && !ui.modal && (overRock() || falling.some(b => Math.hypot(mouse.x - fx(b), mouse.y - b.y) < b.r * 1.3)) ? "crosshair" : "default");
   requestAnimationFrame(frame);
 }
 function boot() { requestAnimationFrame(frame); }
