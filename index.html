@@ -17,7 +17,7 @@
 <script>
 "use strict";
 /* =====================================================================
-   YOUR AVERAGE MINING GAME  (version 2)
+   YOUR AVERAGE MINING GAME  (version 3)
    Sixten's Scratch game, rebuilt as a full-window web game.
    Layer 1 ("Rock Cave") is still HIS game: same minerals, same odds,
    same shop prices. Everything below it is new.
@@ -52,11 +52,11 @@ const tierOf = r => RARITIES.indexOf(r);
 const LAYERS = [
   { name: "Rock Cave",     hp: 5,  cost: 0 },
   { name: "Deep Cave",     hp: 8,  cost: 5e6 },
-  { name: "Magma Depths",  hp: 12, cost: 5e9 },
-  { name: "The Void",      hp: 16, cost: 5e12 },
-  { name: "The Core",      hp: 0,  cost: 5e14, core: true },
+  { name: "Magma Depths",  hp: 12, cost: 2e10 },
+  { name: "The Void",      hp: 16, cost: 2e13 },
+  { name: "The Core",      hp: 0,  cost: 1e15, core: true },
 ];
-const CORE_HP = 25000;
+const CORE_HP = 80000;
 
 // Every mineral. d = "pick random 1 to d = d?" checked top to bottom
 // (his exact system). d: 0 = the plain rock you get if nothing hits.
@@ -146,16 +146,16 @@ function rollMineral(layer, rolls, rand) {
   return best;
 }
 
-// ---- Shop. The first entries of mult/speed/drill are HIS upgrades. ----
+
+// ---- Shop. The depth-0 entries of mult/speed/drill are HIS upgrades. ----
+// depth = how deep you must have dug before that tier shows up, so the
+// Rock Cave shop is exactly his, and every new depth unlocks new things.
 const UPG = {
   mult: [ // Upgrades 1
     { cost: 50, v: 2 }, { cost: 150, v: 4 }, { cost: 250, v: 8 }, { cost: 500, v: 10 },
     { cost: 1000, v: 20 }, { cost: 2500, v: 50 }, { cost: 10000, v: 100 },
-    // new tiers
-    { cost: 2e7, v: 250, label: "X250 Money multiplier" },
-    { cost: 1e10, v: 500, label: "X500 Money multiplier" },
-    { cost: 3e12, v: 1000, label: "X1000 Money multiplier" },
-    { cost: 2e14, v: 2500, label: "X2500 Money multiplier" },
+    { cost: 5e7, v: 250, depth: 1 }, { cost: 3e10, v: 500, depth: 2 },
+    { cost: 1e13, v: 1000, depth: 3 }, { cost: 5e14, v: 2500, depth: 3 },
   ],
   speed: [ // Upgrades 2  (mining = swing half-time, breaking = wait between hits)
     { cost: 50, mining: 0.45, breaking: 0.9 }, { cost: 100, mining: 0.375, breaking: 0.75 },
@@ -164,45 +164,104 @@ const UPG = {
   ],
   drill: [ // his Drill MK 1-4 (from his button text) + new ones
     { cost: 100, v: 5 }, { cost: 350, v: 10 }, { cost: 500, v: 20 }, { cost: 1500, v: 50 },
-    { cost: 1e7, v: 5000, label: "Drill MK 5", sub: "+5000 Gold P/S" },
-    { cost: 1e10, v: 2000000, label: "Drill MK 6", sub: "+2M Gold P/S" },
-    { cost: 5e12, v: 500000000, label: "Drill MK 7", sub: "+500M Gold P/S" },
+    { cost: 3e7, v: 5000, depth: 1, label: "Drill MK 5" },
+    { cost: 3e9, v: 200000, depth: 2, label: "Drill MK 6" },
+    { cost: 3e11, v: 5000000, depth: 2, label: "Drill MK 7" },
+    { cost: 1e13, v: 500000000, depth: 3, label: "Drill MK 8" },
+    { cost: 3e14, v: 20000000000, depth: 3, label: "Drill MK 9" },
   ],
   pick: [ // pickaxe power = rock damage per hit
-    { cost: 3e6, v: 2, label: "Iron pickaxe" },
-    { cost: 2e9, v: 3, label: "Gold pickaxe" },
-    { cost: 1e12, v: 4, label: "Diamond pickaxe" },
-    { cost: 3e14, v: 6, label: "Rektium pickaxe" },
+    { cost: 1e7, v: 2, depth: 1, label: "Iron pickaxe" },
+    { cost: 5e8, v: 3, depth: 1, label: "Steel pickaxe" },
+    { cost: 5e9, v: 4, depth: 2, label: "Gold pickaxe" },
+    { cost: 3e12, v: 5, depth: 3, label: "Diamond pickaxe" },
+    { cost: 1e15, v: 7, depth: 3, label: "Rektium pickaxe" },
+  ],
+  crit: [ // chance for a hit to do 4x damage
+    { cost: 2e8, v: 0.1, depth: 1, label: "Sharp eye I" },
+    { cost: 2e10, v: 0.15, depth: 2, label: "Sharp eye II" },
+    { cost: 1e13, v: 0.2, depth: 3, label: "Sharp eye III" },
+    { cost: 3e14, v: 0.25, depth: 3, label: "Sharp eye IV" },
   ],
   luck: [ // extra rolls per rock, keep the rarest
-    { cost: 1e6, v: 2, label: "Lucky charm I" },
-    { cost: 3e9, v: 3, label: "Lucky charm II" },
-    { cost: 2e12, v: 4, label: "Lucky charm III" },
+    { cost: 3e6, v: 2, depth: 1, label: "Lucky charm I" },
+    { cost: 1e10, v: 3, depth: 2, label: "Lucky charm II" },
+    { cost: 5e12, v: 4, depth: 3, label: "Lucky charm III" },
+    { cost: 3e14, v: 5, depth: 3, label: "Lucky charm IV" },
+  ],
+  helper: [ // mini miners that hit the rock on their own (hits per second, all together)
+    { cost: 2e7, v: 1, depth: 1, label: "Mini miner I" },
+    { cost: 5e9, v: 2, depth: 2, label: "Mini miner II" },
+    { cost: 3e12, v: 4, depth: 3, label: "Mini miner III" },
+    { cost: 5e14, v: 8, depth: 3, label: "Mini miner IV" },
+  ],
+  event: [ // events last longer and come more often
+    { cost: 3e8, v: 1, depth: 1, label: "Lucky lantern I" },
+    { cost: 1e11, v: 2, depth: 2, label: "Lucky lantern II" },
+    { cost: 1e14, v: 3, depth: 3, label: "Lucky lantern III" },
+  ],
+  gear: [ // one piece of gear for each depth
+    { cost: 2e8, v: 1, depth: 1, label: "Frost boots", sub: "x2 gold in the Deep Cave" },
+    { cost: 2e11, v: 2, depth: 2, label: "Heat suit", sub: "x2 gold in the Magma Depths" },
+    { cost: 1e14, v: 3, depth: 3, label: "Void goggles", sub: "x2 gold + 1 luck roll in The Void" },
+    { cost: 3e14, v: 4, depth: 3, label: "Core gloves", sub: "x2 damage on The Core" },
   ],
 };
+const UPG_KEYS = Object.keys(UPG);
 const BASE_SPEED = { mining: 0.48, breaking: 0.96 };
 const BREAK_PAUSE_TICKS = 3;          // his "wait 0.1" before the new rock
 const RUSH_MULT = 3;
+const CRIT_MULT = 4;
+
+// ---- Boss rocks: every 60 rocks in a new depth (never in his Rock Cave) ----
+const BOSS_EVERY = 60;
+const BOSSES = [null,
+  { name: "The Big Basalt", hpMul: 12, skin: "frost" },
+  { name: "Magma King",     hpMul: 12, skin: "magma" },
+  { name: "The Void Eye",   hpMul: 12, skin: "void" },
+];
+// ---- Rebirth perks, bought with Rebirth stars (3 per rebirth) ----
+const STARS_PER_REBIRTH = 3;
+const PERKS = [
+  { id: "golden", name: "Golden touch", desc: "+50% gold per level", max: 5, cost: 1 },
+  { id: "power",  name: "Strong arms",  desc: "+1 pickaxe damage per level", max: 3, cost: 1 },
+  { id: "start",  name: "Head start",   desc: "Start a run with 10K / 1M / 100M gold", max: 3, cost: 1 },
+  { id: "helper", name: "Old friend",   desc: "Start with Mini miner I", max: 1, cost: 1 },
+  { id: "luck",   name: "Lucky soul",   desc: "+1 luck roll per level", max: 2, cost: 2 },
+  { id: "dig",    name: "Shortcut",     desc: "Digging deeper costs 25% less per level", max: 2, cost: 2 },
+];
+const START_GOLD = [0, 1e4, 1e6, 1e8];
 
 function newSave() {
-  return {
-    v: 2, gold: 0, high: 0, mult: 0, speed: 0, drill: 0, pick: 0, luck: 0,
-    layer: 0, maxLayer: 0, coreHP: CORE_HP, coreBroken: false, rebirths: 0,
+  const s = {
+    v: 3, gold: 0, high: 0, layer: 0, maxLayer: 0, coreHP: CORE_HP, coreBroken: false, rebirths: 0,
     found: new Array(MINERALS.length).fill(0), rocks: 0, police: false, quotas: 0,
     ach: {}, time: 0, totalGold: 0, boulders: 0, ended: false,
+    depthRocks: [0, 0, 0, 0, 0], bossKills: [0, 0, 0, 0, 0], bossNext: -1, bossActive: -1,
+    stars: 0, perks: {}, badges: 0, quests: [], questsDone: 0, skins: { classic: true }, skin: "classic",
+    meteors: 0, crits: 0, tierFinds: new Array(RARITIES.length).fill(0),
   };
+  for (const k of UPG_KEYS) s[k] = 0;
+  return s;
 }
+const perk = (s, id) => (s.perks && s.perks[id]) || 0;
 const lvl = (s, k) => s[k] === 0 ? null : UPG[k][s[k] - 1];
 function goldMult(s)  { const u = lvl(s, "mult"); return u ? u.v : 1; }
-function rebirthMult(s) { return Math.pow(2, s.rebirths); }
+function rebirthMult(s) { return Math.pow(2, s.rebirths) * (1 + 0.5 * perk(s, "golden")); }
+function gearMult(s, layer) { return (s.gear >= 1 && layer === 1) || (s.gear >= 2 && layer === 2) || (s.gear >= 3 && layer === 3) ? 2 : 1; }
 function speedOf(s)   { return lvl(s, "speed") || BASE_SPEED; }
-function pickPower(s) { const u = lvl(s, "pick"); return u ? u.v : 1; }
-function luckRolls(s) { const u = lvl(s, "luck"); return u ? u.v : 1; }
+function pickPower(s) { const u = lvl(s, "pick"); return (u ? u.v : 1) + perk(s, "power"); }
+function critChance(s) { const u = lvl(s, "crit"); return u ? u.v : 0; }
+function luckRolls(s) { const u = lvl(s, "luck"); return (u ? u.v : 1) + perk(s, "luck") + (s.gear >= 3 && s.layer === 3 ? 1 : 0); }
+function helperHPS(s) { const u = lvl(s, "helper"); return u ? u.v : 0; }
+function eventBoost(s) { return s.event; }   // 0..3: +25% duration and +15% frequency per level
 function drillPPS(s)  { let t = 0; for (let i = 0; i < s.drill; i++) t += UPG.drill[i].v; return t * rebirthMult(s); }
 function hitInterval(s) { return speedOf(s).breaking + DT; }
+function tierLocked(s, k) { const n = UPG[k][s[k]]; return !!(n && (n.depth || 0) > s.maxLayer); }
 function nextCost(s, k) {
-  if (k === "dig") return s.maxLayer + 1 < LAYERS.length ? LAYERS[s.maxLayer + 1].cost : Infinity;
-  return s[k] < UPG[k].length ? UPG[k][s[k]].cost : Infinity;
+  if (k === "dig") return s.maxLayer + 1 < LAYERS.length ? LAYERS[s.maxLayer + 1].cost * (1 - 0.25 * perk(s, "dig")) : Infinity;
+  if (s[k] >= UPG[k].length || tierLocked(s, k)) return Infinity;
+  return UPG[k][s[k]].cost;
 }
 function canBuy(s, k) { return s.gold >= nextCost(s, k); }
 function buy(s, k) {
@@ -211,21 +270,59 @@ function buy(s, k) {
   if (k === "dig") { s.maxLayer++; s.layer = s.maxLayer; } else s[k]++;
   return true;
 }
-function addGold(s, n) { s.gold += n; s.totalGold += n; if (s.gold > s.high) s.high = s.gold; }
-function rockHP(s) { return LAYERS[s.layer].core ? s.coreHP : LAYERS[s.layer].hp; }
+const GOLD_CAP = 1e300;   // far past anything reachable, but never Infinity (which would break saving)
+function addGold(s, n) { if (!(n > 0)) return; s.gold = Math.min(GOLD_CAP, s.gold + n); s.totalGold = Math.min(GOLD_CAP, s.totalGold + n); if (s.gold > s.high) s.high = s.gold; }
+function bossHP(L) { return LAYERS[L].hp * BOSSES[L].hpMul; }
+function rockHP(s, boss) { return LAYERS[s.layer].core ? s.coreHP : boss ? bossHP(s.layer) : LAYERS[s.layer].hp; }
+// one pickaxe hit: returns the damage (crits do 4x)
+function hitDamage(s, rand, frenzy) {
+  let d = pickPower(s) * (frenzy ? 2 : 1);
+  if (LAYERS[s.layer].core && s.gear >= 4) d *= 2;
+  const crit = rand() < critChance(s);
+  if (crit) { d *= CRIT_MULT; s.crits++; }
+  return { d, crit };
+}
 // payout for a mineral right now
-function payout(s, id, rush) { return MINERALS[id].gold * goldMult(s) * rebirthMult(s) * (rush ? RUSH_MULT : 1); }
+function payout(s, id, rush) { return MINERALS[id].gold * goldMult(s) * rebirthMult(s) * gearMult(s, MINERALS[id].layer) * (rush ? RUSH_MULT : 1); }
+function noteFind(s, id) { s.found[id]++; s.tierFinds[tierOf(MINERALS[id].rarity)]++; }
 function breakRock(s, rand, opts = {}) {
   const id = rollMineral(s.layer, luckRolls(s) + (opts.vein ? 2 : 0), rand);
   addGold(s, payout(s, id, opts.rush));
-  s.found[id]++;
+  noteFind(s, id);
   s.rocks++;
+  s.depthRocks[s.layer]++;
+  if (s.layer >= 1 && s.layer <= 3 && s.depthRocks[s.layer] % BOSS_EVERY === 0) s.bossNext = s.layer;
   return id;
 }
+// boss loot: 5 minerals rolled with +3 luck
+function bossLoot(s, rand) {
+  const ids = [];
+  for (let i = 0; i < 5; i++) { const id = rollMineral(s.layer, luckRolls(s) + 3, rand); ids.push(id); addGold(s, payout(s, id, false)); noteFind(s, id); }
+  s.bossKills[s.layer]++;
+  s.rocks++;
+  return ids;
+}
 function rebirth(s) {
-  const keep = { found: s.found, ach: s.ach, rebirths: s.rebirths + 1, high: s.high, police: true, quotas: s.quotas, time: s.time, totalGold: s.totalGold, boulders: s.boulders, rocks: s.rocks, ended: s.ended };
+  const keep = {
+    found: s.found, ach: s.ach, rebirths: s.rebirths + 1, high: s.high, police: true, quotas: s.quotas, time: s.time,
+    totalGold: s.totalGold, boulders: s.boulders, rocks: s.rocks, ended: s.ended, bossKills: s.bossKills,
+    stars: s.stars + STARS_PER_REBIRTH, perks: s.perks, badges: s.badges, quests: s.quests, questsDone: s.questsDone,
+    skins: s.skins, skin: s.skin, meteors: s.meteors, crits: s.crits, tierFinds: s.tierFinds,
+  };
   const n = Object.assign(newSave(), keep);
+  applyStartPerks(n);
   return n;
+}
+function applyStartPerks(s) {
+  s.gold = Math.max(s.gold, START_GOLD[perk(s, "start")]);
+  if (perk(s, "helper") && s.helper < 1) s.helper = 1;
+}
+function buyPerk(s, id) {
+  const p = PERKS.find(p => p.id === id); if (!p) return false;
+  const l = perk(s, id); if (l >= p.max || s.stars < p.cost) return false;
+  s.stars -= p.cost; s.perks[id] = l + 1;
+  if (id === "start" || id === "helper") applyStartPerks(s);
+  return true;
 }
 // ==/CORE==
 
@@ -260,7 +357,8 @@ function hsl(h, s, l, a = 1) { return `hsla(${h},${s}%,${l}%,${a})`; }
 // numbers: 250 000 like on his costumes, then 1.25M, 3.4B ...
 const SUFFIX = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc"];
 function fmt(n) {
-  n = Math.floor(n);
+  if (!isFinite(n)) return n > 0 ? "\u221e" : "0";
+  n = Math.floor(Math.max(0, n));
   if (n < 1e6) return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   let i = Math.floor(Math.log10(n) / 3);
   if (i >= SUFFIX.length) return n.toExponential(2).replace("e+", "e");
@@ -610,10 +708,10 @@ function drawHead(kind, x, y, r, face = 1, t = 0) {
   // eye (his: a single black dot looking forward)
   const blink = (Math.sin(t * 0.9 + (kind === "police" ? 2 : 0)) > 0.985) ? 0.15 : 1;
   ctx.fillStyle = INK; ctx.beginPath(); ctx.ellipse(face * r * 0.42, -r * 0.02, r * 0.14, r * 0.17 * blink, 0, 0, TAU); ctx.fill();
-  if (kind === "miner") {
+  if (kind === "miner" || kind === "mini") {
     // orange hard hat with the line on top + a lamp
     ctx.beginPath(); ctx.arc(0, -r * 0.18, r * 1.04, Math.PI, 0); ctx.closePath();
-    const hg = ctx.createLinearGradient(0, -r * 1.2, 0, 0); hg.addColorStop(0, "#ffc04a"); hg.addColorStop(1, "#e07800");
+    const hg = ctx.createLinearGradient(0, -r * 1.2, 0, 0); hg.addColorStop(0, kind === "mini" ? "#fff27a" : "#ffc04a"); hg.addColorStop(1, kind === "mini" ? "#d8b000" : "#e07800");
     ctx.fillStyle = hg; ctx.fill(); ctx.lineWidth = Math.max(2, r * 0.14); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(-r * 1.28, -r * 0.18); ctx.lineTo(r * 1.28, -r * 0.18); ctx.lineWidth = r * 0.22; ctx.strokeStyle = INK; ctx.stroke();
     ctx.lineWidth = r * 0.12; ctx.strokeStyle = "#e07800"; ctx.stroke();
@@ -635,31 +733,32 @@ function drawHead(kind, x, y, r, face = 1, t = 0) {
   ctx.restore();
 }
 // swing: 0 = pickaxe down on the rock, 1 = raised (his costume1 / costume2)
-function drawMiner(x, gy, s, swing, t, smear) {
-  ctx.save(); ctx.translate(x, gy); ctx.scale(s, s);
+function drawMiner(x, gy, s, swing, t, smear, skin = SKINS[0], flip = 1, hat = true) {
+  ctx.save(); ctx.translate(x, gy); ctx.scale(s * flip, s);
   const bob = Math.sin(t * 2.2) * 1.5;
   const hip = [0, -64 + bob * 0.3], neck = [2, -112 + bob], sh = [3, -104 + bob];
   const ang = lerp(0.55, -2.25, easeOut(swing));
   const hand = [sh[0] + Math.cos(ang) * 36, sh[1] + Math.sin(ang) * 36];
   // pickaxe behind the front arm
   ctx.save(); ctx.translate(hand[0], hand[1]); ctx.rotate(ang);
-  if (smear > 0) { ctx.strokeStyle = `rgba(255,255,255,${smear * 0.35})`; ctx.lineWidth = 26; ctx.beginPath(); ctx.arc(-36, 0, 120, -0.9, 0.0); ctx.stroke(); }
-  ctx.fillStyle = "#8a5a2b"; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  if (smear > 0) { ctx.strokeStyle = skinTrail(skin, smear * 0.45, t); ctx.lineWidth = 26; ctx.beginPath(); ctx.arc(-36, 0, 120, -0.9, 0.0); ctx.stroke(); }
+  ctx.fillStyle = skin.handle; ctx.strokeStyle = INK; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-18, -5, 112, 10, 5) : ctx.rect(-18, -5, 112, 10); ctx.fill(); ctx.stroke();
   ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(-14, -3.5, 104, 3);
   // pick head (his grey #7b7b7b), curved both ways
   ctx.translate(92, 0);
   ctx.beginPath(); ctx.moveTo(-6, -8); ctx.quadraticCurveTo(14, -36, 2, -62); ctx.quadraticCurveTo(26, -34, 10, -6);
   ctx.lineTo(10, 6); ctx.quadraticCurveTo(26, 34, 2, 58); ctx.quadraticCurveTo(14, 34, -6, 8); ctx.closePath();
-  const mg = ctx.createLinearGradient(-6, 0, 20, 0); mg.addColorStop(0, "#b8b8c0"); mg.addColorStop(1, "#6a6a72");
-  ctx.fillStyle = mg; ctx.fill(); ctx.lineWidth = 3.5; ctx.stroke();
+  skinFill(skin, t);
+  ctx.lineWidth = 3.5; ctx.strokeStyle = INK; ctx.stroke();
+  if (skin.glow) glow(8, 0, 50, skin.glow, 0.5 + 0.2 * Math.sin(t * 6));
   ctx.restore();
   // legs + body + arms
   limb([hip, [-8, -32], [-18, 0]], 9);
   limb([hip, [12, -32], [20, 0]], 9);
   limb([hip, neck], 11);
   limb([sh, [sh[0] + Math.cos(ang + 0.9) * 20, sh[1] + Math.sin(ang + 0.9) * 20], hand], 8);
-  drawHead("miner", 4, -134 + bob, 22, 1, t);
+  drawHead(hat ? "miner" : "mini", 4, -134 + bob, 22, 1, t);
   ctx.restore();
 }
 function drawPolice(x, gy, s, walk, t, face = -1, talking = false) {
@@ -763,10 +862,104 @@ function drawIcon(name, x, y, s, color = "#f4ead8") {
     case "rush": drawCoin(0, 0, s * 0.4); for (let i = 0; i < 3; i++) star(Math.cos(i * 2.1) * s * 0.48, Math.sin(i * 2.1) * s * 0.48, s * 0.14, "#fff"); break;
     case "cavein": ctx.fillStyle = "#6a6a6a"; for (const [a, b, r] of [[-0.2, -0.2, 0.2], [0.2, 0.05, 0.16], [-0.1, 0.25, 0.14]]) { ctx.beginPath(); ctx.arc(a * s, b * s, r * s, 0, TAU); ctx.fill(); st(s * 0.06, INK); } break;
     case "vein": drawMineralIcon(0, 0, s * 0.5); break;
+    case "star": ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.2 : s * 0.46; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fillStyle = color === "#f4ead8" ? "#ffd447" : color; ctx.fill(); st(s * 0.08, INK); break;
+    case "crit": ctx.beginPath(); for (let i = 0; i < 16; i++) { const a = i * Math.PI / 8, r = i % 2 ? s * 0.22 : s * 0.46; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fillStyle = "#ff5a3a"; ctx.fill(); st(s * 0.07, INK);
+      ctx.font = `${s * 0.34}px ${FONT_T}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff"; ctx.fillText("x4", 0, s * 0.02); break;
+    case "helper": drawHead("mini", 0, s * 0.12, s * 0.3, 1, 0); break;
+    case "event": ctx.fillStyle = "#5a4030"; ctx.fillRect(-s * 0.06, -s * 0.48, s * 0.12, s * 0.12); ctx.beginPath(); ctx.rect(-s * 0.24, -s * 0.36, s * 0.48, s * 0.66); ctx.fillStyle = "rgba(255,210,80,0.85)"; ctx.fill(); st(s * 0.08, INK);
+      glow(0, 0, s * 0.6, "rgba(255,200,60,0.6)", 0.8); break;
+    case "gear": ctx.beginPath(); ctx.moveTo(-s * 0.22, -s * 0.42); ctx.lineTo(s * 0.02, -s * 0.42); ctx.lineTo(s * 0.02, s * 0.14); ctx.lineTo(s * 0.4, s * 0.14); ctx.lineTo(s * 0.4, s * 0.42); ctx.lineTo(-s * 0.22, s * 0.42); ctx.closePath(); ctx.fillStyle = "#7ab8ff"; ctx.fill(); st(s * 0.08, INK); break;
+    case "meteor": drawMeteor(s * 0.1, s * 0.1, s * 0.26, s * 0.08, s * 0.08, 0, false); break;
+    case "frenzy": drawIcon("pick", 0, 0, s, "#ff8a2a"); for (let i = 0; i < 3; i++) star(Math.cos(i * 2.1) * s * 0.4, Math.sin(i * 2.1) * s * 0.4, s * 0.14, "#ffd447"); break;
+    case "orders": ctx.fillStyle = "#e8dcc0"; ctx.beginPath(); ctx.rect(-s * 0.32, -s * 0.42, s * 0.64, s * 0.84); ctx.fill(); st(s * 0.08, INK);
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(-s * 0.18, -s * 0.2 + i * s * 0.18); ctx.lineTo(s * 0.18, -s * 0.2 + i * s * 0.18); st(s * 0.06, "#6a5a40"); }
+      ctx.save(); ctx.translate(s * 0.22, s * 0.3); ctx.fillStyle = "#ffcf3a"; ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.08 : s * 0.18; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.lineWidth = s * 0.05; ctx.strokeStyle = INK; ctx.stroke(); ctx.restore(); break;
+    case "badge": ctx.fillStyle = "#ffcf3a"; ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.2 : s * 0.45; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); st(s * 0.08, INK); break;
   }
   ctx.restore();
 }
 function drawMineralIcon(x, y, s) { drawMineral(MINERALS[9], x, y, s); }
+
+// ---------- Pickaxe skins ----------
+// cost = Rock police badges. cost -1 = you get it by beating that boss rock.
+const SKINS = [
+  { id: "classic", name: "Classic",   cost: 0,  head: ["#b8b8c0", "#6a6a72"], handle: "#8a5a2b", trail: [255, 255, 255] },
+  { id: "gold",    name: "Golden",    cost: 3,  head: ["#fff2a0", "#c88a00"], handle: "#5a3a1a", trail: [255, 210, 80] },
+  { id: "glassum", name: "Glassum",   cost: 5,  head: ["#ffffff", "#9fb8c8"], handle: "#6a8aa0", trail: [200, 240, 255] },
+  { id: "pixel",   name: "Pixulium",  cost: 7,  head: "pixel",                handle: "#3a3a3a", trail: [120, 255, 80] },
+  { id: "frost",   name: "Frost",     cost: -1, boss: 1, head: ["#e0f8ff", "#4aa0d0"], handle: "#2a4a6a", trail: [160, 220, 255] },
+  { id: "magma",   name: "Magma",     cost: -1, boss: 2, head: ["#ffd04a", "#c83a00"], handle: "#2a1a10", trail: [255, 120, 30], glow: "rgba(255,120,30,0.6)" },
+  { id: "void",    name: "Void",      cost: -1, boss: 3, head: ["#c89aff", "#2a1a4a"], handle: "#120c1e", trail: [190, 120, 255], glow: "rgba(170,90,255,0.6)" },
+  { id: "rektium", name: "Rektium",   cost: 12, head: "rainbow",              handle: "#1a1a1a", trail: "rainbow" },
+  { id: "baton",   name: "Police issue", cost: 20, head: ["#7a7a86", "#2a2a30"], handle: "#262a3a", trail: [154, 176, 255], glow: "rgba(120,150,255,0.5)" },
+];
+function skinTrail(skin, a, t) { return skin.trail === "rainbow" ? hsl((t * 200) % 360, 100, 65, a) : rgb(skin.trail, a); }
+function skinFill(skin, t) {
+  if (skin.head === "rainbow") {
+    const g = ctx.createLinearGradient(-6, -60, 20, 60);
+    for (let i = 0; i <= 5; i++) g.addColorStop(i / 5, hsl((t * 90 + i * 60) % 360, 100, 55));
+    ctx.fillStyle = g; ctx.fill();
+  } else if (skin.head === "pixel") {
+    ctx.fillStyle = "#0090ff"; ctx.fill();
+    ctx.save(); ctx.clip(); const cols = ["#4eff00", "#ca00ff", "#ff0000", "#0090ff", "#ffea00"];
+    for (let y = -64; y < 64; y += 8) for (let x = -8; x < 30; x += 8) { ctx.fillStyle = cols[((x * 7 + y * 13) >>> 0) % 5]; ctx.fillRect(x, y, 8.5, 8.5); }
+    ctx.restore();
+  } else {
+    const g = ctx.createLinearGradient(-6, 0, 20, 0); g.addColorStop(0, skin.head[0]); g.addColorStop(1, skin.head[1]);
+    ctx.globalAlpha = skin.id === "glassum" ? 0.85 : 1; ctx.fillStyle = g; ctx.fill(); ctx.globalAlpha = 1;
+  }
+}
+// a pickaxe on its own, for the skin shop
+function drawPickaxe(x, y, s, skin, t) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.rotate(-0.75);
+  ctx.fillStyle = skin.handle; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.rect(-6, -40, 12, 100); ctx.fill(); ctx.stroke();
+  ctx.translate(0, -44); ctx.rotate(Math.PI / 2);
+  ctx.beginPath(); ctx.moveTo(-6, -8); ctx.quadraticCurveTo(14, -36, 2, -62); ctx.quadraticCurveTo(26, -34, 10, -6);
+  ctx.lineTo(10, 6); ctx.quadraticCurveTo(26, 34, 2, 58); ctx.quadraticCurveTo(14, 34, -6, 8); ctx.closePath();
+  skinFill(skin, t); ctx.lineWidth = 3.5; ctx.strokeStyle = INK; ctx.stroke();
+  if (skin.glow) glow(8, 0, 60, skin.glow, 0.6);
+  ctx.restore();
+}
+
+// ---------- Boss rocks: a face on the rock, plus something for each depth ----------
+function drawBossFace(L, x, y, R, t, hurt) {
+  ctx.save(); ctx.translate(x, y);
+  const look = -R * 0.06, sq = hurt > 0.2 ? 0.4 : 1;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if (L === 3) {          // The Void Eye: one huge eye
+    ctx.beginPath(); ctx.ellipse(0, -R * 0.05, R * 0.42, R * 0.3 * sq, 0, 0, TAU); ctx.fillStyle = "#f4ecff"; ctx.fill(); ctx.lineWidth = R * 0.05; ctx.strokeStyle = INK; ctx.stroke();
+    ctx.save(); ctx.clip();
+    ctx.beginPath(); ctx.arc(look * 3 + Math.sin(t * 1.3) * R * 0.05, -R * 0.05, R * 0.2, 0, TAU); ctx.fillStyle = "#8a2aff"; ctx.fill();
+    ctx.beginPath(); ctx.arc(look * 3 + Math.sin(t * 1.3) * R * 0.05, -R * 0.05, R * 0.09, 0, TAU); ctx.fillStyle = INK; ctx.fill();
+    ctx.restore();
+    glow(0, -R * 0.05, R * 0.8, "rgba(170,90,255,0.5)", 0.5 + 0.2 * Math.sin(t * 3));
+  } else {
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.ellipse(side * R * 0.3, -R * 0.12, R * 0.15, R * 0.17 * sq, 0, 0, TAU); ctx.fillStyle = "#ffffff"; ctx.fill(); ctx.lineWidth = R * 0.04; ctx.strokeStyle = INK; ctx.stroke();
+      ctx.beginPath(); ctx.arc(side * R * 0.3 + look, -R * 0.08, R * 0.07 * sq, 0, TAU); ctx.fillStyle = L === 2 ? "#ff4a00" : INK; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(side * R * 0.48, -R * 0.38); ctx.lineTo(side * R * 0.14, -R * 0.26); ctx.lineWidth = R * 0.08; ctx.strokeStyle = INK; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(-R * 0.26, R * 0.3); for (let i = 1; i <= 6; i++) ctx.lineTo(-R * 0.26 + i * R * 0.0867, R * (i % 2 ? 0.22 : 0.3)); ctx.lineWidth = R * 0.05; ctx.strokeStyle = INK; ctx.stroke();
+  }
+  if (L === 1) {          // The Big Basalt: ice spikes
+    for (let i = -2; i <= 2; i++) { const bx = i * R * 0.22, h = R * (0.35 - Math.abs(i) * 0.06); ctx.beginPath(); ctx.moveTo(bx - R * 0.1, -R * 0.78 + Math.abs(i) * R * 0.05); ctx.lineTo(bx, -R * 0.78 - h + Math.abs(i) * R * 0.05); ctx.lineTo(bx + R * 0.1, -R * 0.78 + Math.abs(i) * R * 0.05); ctx.closePath(); ctx.fillStyle = "#bfefff"; ctx.fill(); ctx.lineWidth = R * 0.03; ctx.strokeStyle = INK; ctx.stroke(); }
+  }
+  if (L === 2) {          // Magma King: a gold crown
+    ctx.beginPath(); ctx.moveTo(-R * 0.4, -R * 0.72); ctx.lineTo(-R * 0.45, -R * 1.12); ctx.lineTo(-R * 0.2, -R * 0.92); ctx.lineTo(0, -R * 1.2); ctx.lineTo(R * 0.2, -R * 0.92); ctx.lineTo(R * 0.45, -R * 1.12); ctx.lineTo(R * 0.4, -R * 0.72); ctx.closePath();
+    const g = ctx.createLinearGradient(0, -R * 1.2, 0, -R * 0.7); g.addColorStop(0, "#fff2a0"); g.addColorStop(1, "#d08a00"); ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = R * 0.04; ctx.strokeStyle = INK; ctx.stroke();
+    for (const gx of [-0.22, 0, 0.22]) { ctx.beginPath(); ctx.arc(gx * R, -R * 0.82, R * 0.05, 0, TAU); ctx.fillStyle = "#ff2050"; ctx.fill(); }
+  }
+  ctx.restore();
+}
+// a meteor: a hot little rock with a fiery tail
+function drawMeteor(x, y, r, vx, vy, t, landed) {
+  if (!landed) { ctx.save(); ctx.globalCompositeOperation = "lighter"; for (let i = 1; i <= 6; i++) { ctx.globalAlpha = 0.18 * (1 - i / 7); ctx.fillStyle = "#ff8a2a"; ctx.beginPath(); ctx.arc(x - vx * i * 1.6, y - vy * i * 1.6, r * (1 - i * 0.1), 0, TAU); ctx.fill(); } ctx.restore(); }
+  glow(x, y, r * 3, "rgba(255,150,40,0.8)", 0.6 + 0.2 * Math.sin(t * 8));
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU);
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r); g.addColorStop(0, "#ffe080"); g.addColorStop(0.5, "#ff7a1a"); g.addColorStop(1, "#5a1a08");
+  ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+}
 
 // =====================================================================
 // 4. THE CAVE — a layered background. Far layers move less than near
@@ -1021,6 +1214,8 @@ const SFX = {
   deny() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(150, t, 0.16, { type: "square", gain: 0.07, lp: 900 }); tone(110, t + 0.08, 0.16, { type: "square", gain: 0.07, lp: 900 }); },
   find(tier) {
     if (!A.ctx || tier < 2) return; const t = A.ctx.currentTime;
+    if (t - (SFX.lastFind || 0) < 0.25 && tier <= (SFX.lastTier || 0)) return;
+    SFX.lastFind = t; SFX.lastTier = tier;
     const sc = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28];
     const n = Math.min(3 + tier, 12);
     for (let i = 0; i < n; i++) { const f = midi(76 + sc[i]); tone(f, t + i * 0.055, 0.7, { gain: 0.07, echo: 0.6 }); tone(f * 2.76, t + i * 0.055, 0.3, { gain: 0.015 }); }
@@ -1031,6 +1226,10 @@ const SFX = {
   whistle() { if (!A.ctx) return; const t = A.ctx.currentTime; for (let i = 0; i < 2; i++) { tone(2300, t + i * 0.2, 0.14, { type: "sine", gain: 0.08 }); tone(2450, t + i * 0.2, 0.14, { type: "sine", gain: 0.05 }); } },
   rumble() { if (!A.ctx) return; const t = A.ctx.currentTime; noise(t, 2.2, { f: 160, gain: 0.5, attack: 0.2 }); tone(45, t, 2, { gain: 0.25, slide: 30 }); },
   boom() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(90, t, 0.5, { gain: 0.4, slide: 30 }); noise(t, 0.6, { f: 600, gain: 0.3 }); },
+  tink() { if (!A.ctx) return; const t = A.ctx.currentTime; if (t - (SFX.lastTink || 0) < 0.09) return; SFX.lastTink = t; tone(1800 + Math.random() * 400, t, 0.06, { type: "triangle", gain: 0.04 }); noise(t, 0.04, { ft: "highpass", f: 4000, gain: 0.03 }); },
+  crit() { if (!A.ctx) return; const t = A.ctx.currentTime; if (t - (SFX.lastCrit || 0) < 0.12) return; SFX.lastCrit = t; tone(1200, t, 0.18, { type: "square", gain: 0.05, slide: 400, lp: 4000 }); noise(t, 0.15, { ft: "bandpass", f: 2500, gain: 0.12 }); },
+  roar() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(70, t, 1.2, { type: "sawtooth", gain: 0.12, slide: 45, lp: 500, attack: 0.1 }); tone(105, t, 1.2, { type: "sawtooth", gain: 0.08, slide: 60, lp: 500, attack: 0.1 }); noise(t, 1.2, { f: 300, gain: 0.25, attack: 0.15 }); },
+  whoosh() { if (!A.ctx) return; const t = A.ctx.currentTime; noise(t, 1.4, { ft: "bandpass", f: 900, q: 1.5, gain: 0.25, attack: 0.5 }); tone(400, t, 1.4, { gain: 0.04, slide: 120, attack: 0.4 }); },
   coin() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(midi(88), t, 0.12, { type: "square", gain: 0.03, lp: 5000 }); tone(midi(95), t + 0.05, 0.2, { type: "square", gain: 0.03, lp: 5000 }); },
 };
 
@@ -1071,48 +1270,66 @@ function musicTick() {
 // =====================================================================
 // 6. SAVING (localStorage = a small storage box inside the browser)
 // =====================================================================
-const SAVE_KEY = "your-average-mining-game-v1";     // same key as v1, so old saves load
+const SAVE_KEY = "your-average-mining-game-v1";     // same key since v1, so old saves load
 const SET_KEY = "your-average-mining-game-settings";
+const num = v => typeof v === "number" && isFinite(v);
 function loadSave() {
   const s = newSave();
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (raw) {
-      const d = JSON.parse(raw);
-      for (const k of ["gold", "high", "mult", "speed", "drill", "pick", "luck", "layer", "maxLayer", "coreHP", "rebirths", "rocks", "quotas", "time", "totalGold", "boulders"])
-        if (typeof d[k] === "number" && isFinite(d[k])) s[k] = d[k];
-      for (const k of ["police", "coreBroken", "ended"]) s[k] = !!d[k];
-      // v1 saves had 17 minerals = exactly the first 17 here
-      if (Array.isArray(d.found)) d.found.forEach((n, i) => { if (i < s.found.length && typeof n === "number") s.found[i] = n; });
-      if (d.ach && typeof d.ach === "object") for (const k in d.ach) s.ach[k] = !!d.ach[k];
-      if (typeof d.muted === "boolean") settings.muted = d.muted;   // v1 kept mute in the save
-      if (!d.v) s.totalGold = Math.max(s.totalGold, s.high);
-      for (const k in UPG) s[k] = clamp(Math.floor(s[k]), 0, UPG[k].length);
-      s.maxLayer = clamp(Math.floor(s.maxLayer), 0, LAYERS.length - 1);
-      s.layer = clamp(Math.floor(s.layer), 0, s.maxLayer);
-      if (s.coreHP <= 0 && !s.coreBroken) s.coreHP = CORE_HP;
-      s.v = 2;
+    if (!raw) return s;
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== "object") return s;
+    // copy every field that has the right type (anything broken keeps its default)
+    for (const k in s) {
+      const def = s[k], v = d[k];
+      if (typeof def === "number") { if (num(v)) s[k] = v; }
+      else if (typeof def === "boolean") { if (typeof v === "boolean") s[k] = v; }
+      else if (typeof def === "string") { if (typeof v === "string") s[k] = v; }
+      else if (Array.isArray(def)) {
+        if (k === "quests") { if (Array.isArray(v)) s.quests = v.filter(q => q && typeof q.type === "string" && num(q.n) && num(q.base)).slice(0, 3); }
+        else if (Array.isArray(v)) v.forEach((n, i) => { if (i < def.length && num(n)) def[i] = n; });
+      } else if (def && typeof def === "object") { if (v && typeof v === "object") for (const j in v) { if (typeof v[j] === "boolean" || num(v[j])) def[j] = v[j]; } }
     }
+    if (typeof d.muted === "boolean" && !d.v) settings.muted = d.muted;   // v1 kept mute in the save
+    // v2 -> v3: the pickaxe and drill lists got new tiers in the middle
+    if (d.v === 2) {
+      if (s.pick >= 2) s.pick += 1;      // Gold/Diamond/Rektium moved up one slot
+      if (s.drill >= 6) s.drill += 1;    // MK6/MK7 moved up one slot
+    }
+    if (!d.v) s.totalGold = Math.max(s.totalGold, s.high);
+    for (const k of UPG_KEYS) s[k] = clamp(Math.floor(s[k]), 0, UPG[k].length);
+    s.maxLayer = clamp(Math.floor(s.maxLayer), 0, LAYERS.length - 1);
+    s.layer = clamp(Math.floor(s.layer), 0, s.maxLayer);
+    if (s.coreBroken) s.coreHP = 0; else if (!(s.coreHP > 0) || s.coreHP > CORE_HP) s.coreHP = CORE_HP;
+    if (s.layer === 4 && s.coreBroken) s.layer = 3;
+    if (!SKINS.some(k => k.id === s.skin) || !s.skins[s.skin]) s.skin = "classic";
+    s.skins.classic = true;
+    const perks = {}; for (const p of PERKS) { const l = Math.floor(s.perks[p.id] || 0); if (l > 0) perks[p.id] = Math.min(l, p.max); } s.perks = perks;
+    for (const k in s.skins) if (!SKINS.some(x => x.id === k)) delete s.skins[k];
+    s.gold = Math.min(s.gold, GOLD_CAP); s.high = Math.min(s.high, GOLD_CAP); s.totalGold = Math.min(s.totalGold, GOLD_CAP);
+    s.gold = Math.max(0, s.gold); s.stars = Math.max(0, Math.floor(s.stars)); s.badges = Math.max(0, Math.floor(s.badges));
+    s.v = 3;
   } catch (e) {}
   return s;
 }
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
-function loadSettings() { try { const d = JSON.parse(localStorage.getItem(SET_KEY) || "{}"); for (const k in settings) if (typeof d[k] === typeof settings[k]) settings[k] = d[k]; } catch (e) {} }
+function loadSettings() { try { const d = JSON.parse(localStorage.getItem(SET_KEY) || "{}"); for (const k in settings) if (typeof d[k] === typeof settings[k] && (typeof d[k] !== "number" || isFinite(d[k]))) settings[k] = d[k]; settings.music = clamp(settings.music, 0, 1); settings.sfx = clamp(settings.sfx, 0, 1); } catch (e) {} }
 function saveSettings() { try { localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch (e) {} }
 loadSettings();
 let S = loadSave();
 const hasProgress = () => S.rocks > 0 || S.gold > 0;
 
 // =====================================================================
-// 7. SCREEN + LAYOUT. The game world is always 720 units tall; the width
-//    grows with the window, so it fills any screen.
+// 7. SCREEN + LAYOUT. The world is always at least 720 units tall and
+//    1000 wide; it grows with the window, so it fills any screen.
 // =====================================================================
 const canvas = document.getElementById("c");
 ctx = canvas.getContext("2d");
 let W = 1280, H = 720, scale = 1, dpr = 1;
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
   scale = Math.min(vh / 720, vw / 1000);
   W = vw / scale; H = vh / scale;
   canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
@@ -1121,30 +1338,36 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-const ui = { shopA: 0, shop: false, modal: null, idxLayer: 0, idxPick: 0, toasts: [], banner: null, dialog: null, flash: null, fade: 1, fadeTo: 0, trans: null, layerCard: 0, drag: null, sliders: {}, confirm: null, resetArmed: 0 };
+const ui = { shopA: 0, shop: false, shopTab: 0, modal: null, idxLayer: 0, idxPick: 0, ordersTab: 0, achPage: 0, toasts: [], banner: null, dialog: null, flash: null, fade: 1, fadeTo: 0, trans: null, layerCard: 0, drag: null, sliders: {}, confirm: null, resetArmed: 0, linger: [], starting: false };
 const lay = {};
 function computeLayout() {
   lay.W = W; lay.H = H; lay.hud = 86; lay.ground = H - 104;
-  lay.shopW = Math.min(360, W * 0.36);
+  lay.shopW = Math.min(370, W * 0.37);
   lay.sceneL = easeOut(ui.shopA) * (lay.shopW + 20);
   const free = W - lay.sceneL;
   lay.cx = lay.sceneL + free / 2;
   lay.rockR = clamp(Math.min(free * 0.1, H * 0.13), 64, 112);
   lay.s = lay.rockR / 95;
   const core = LAYERS[S.layer].core;
-  lay.R = core ? lay.rockR * 1.5 : lay.rockR;
-  lay.rockX = lay.cx + 40 * lay.s;
+  lay.R = core ? lay.rockR * 1.5 : rock.boss ? lay.rockR * 1.3 : lay.rockR;
+  lay.rockX = lay.cx + 20 * lay.s;
   lay.rockY = core ? lay.ground - lay.R * 1.25 : lay.ground - lay.R * 0.93;
   lay.minerX = lay.rockX - lay.R - 92 * lay.s;
   lay.lamp = [lay.minerX + 18 * lay.s, lay.ground - 148 * lay.s];
   lay.drillX = lay.rockX + lay.R + 28 * lay.s;
-  lay.policeX = lay.rockX + lay.R + (S.drill > 0 ? 150 : 90) * lay.s;
+  lay.miniX = i => lay.rockX + lay.R * 0.72 + i * 34 * lay.s;
+  lay.policeX = Math.min(W - 70 * lay.s, lay.rockX + lay.R + (110 + 34 * S.helper + (S.drill ? 40 : 0)) * lay.s);
+  // bottom bar: shop button on the left, dock buttons on the right, event bars in between
+  lay.dockN = 2 + (S.police ? 1 : 0) + (S.rebirths > 0 || S.stars > 0 ? 1 : 0);
+  lay.dockL = W - 14 - lay.dockN * 64 + 10;
+  lay.barsCX = (210 + lay.dockL) / 2;
+  lay.barsW = Math.min(340, lay.dockL - 230);
 }
 
 // ---------- input ----------
-const mouse = { x: 0, y: 0, down: false, ui: false };
+const mouse = { x: -1, y: -1, down: false, ui: false };
 let spaceDown = false;
-let regions = [], hoverId = null;   // clickable areas, rebuilt every frame
+let regions = [], hoverId = null;   // clickable areas, rebuilt every frame from what was drawn
 function reg(id, x, y, w, h, fn) { regions.push({ id, x, y, w, h, fn }); }
 function regionAt(x, y) { for (let i = regions.length - 1; i >= 0; i--) { const r = regions[i]; if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r; } return null; }
 const anims = {};
@@ -1161,17 +1384,19 @@ canvas.addEventListener("pointerdown", e => {
 });
 canvas.addEventListener("pointermove", e => { setMouse(e); if (ui.drag) dragSlider(); });
 window.addEventListener("pointerup", () => { mouse.down = false; mouse.ui = false; if (ui.drag) { ui.drag = null; saveSettings(); } });
-window.addEventListener("pointercancel", () => { mouse.down = false; });
+window.addEventListener("pointercancel", () => { mouse.down = false; mouse.ui = false; });
 window.addEventListener("blur", () => { mouse.down = false; spaceDown = false; save(); });
 window.addEventListener("beforeunload", save);
 window.addEventListener("keydown", e => {
   initAudio();
   if (e.code === "Space") { spaceDown = true; e.preventDefault(); }
   if (e.key === "m" || e.key === "M") toggleMute();
+  if (e.key === "Escape" && ui.modal && ui.modal !== "ending") { closeModal(); return; }
   if (screen !== "game") return;
-  if (e.key === "Escape") { if (ui.modal) closeModal(); else if (ui.shop) ui.shop = false; else goTitle(); }
+  if (e.key === "Escape") { if (ui.shop) ui.shop = false; else if (!ui.modal) goTitle(); }
+  if (ui.modal) return;
   if (e.key === "s" || e.key === "S") ui.shop = !ui.shop;
-  if (e.key === "i" || e.key === "I") openModal(ui.modal === "index" ? null : "index");
+  if (e.key === "i" || e.key === "I") openModal("index");
 });
 window.addEventListener("keyup", e => { if (e.code === "Space") spaceDown = false; });
 function toggleMute() { settings.muted = !settings.muted; if (settings.muted) stopHis(); applyVolumes(); saveSettings(); }
@@ -1183,106 +1408,180 @@ let screen = "title";
 let T = 0;                 // ticks since start (30 per second)
 const rand = Math.random;
 const randInt = (a, b) => a + Math.floor(rand() * (b - a + 1));
-const rock = { shape: rockShape(1), dmg: 0, rot: 0, size: 1, bright: 0, flash: 0, squash: 0, pop: 1, pause: 0 };
-const game = { cool: 0, swing: 1, smear: 0, shake: 0, px: 0, py: 0, drillT: 0, goldShown: 0, incomeHist: [], lastTotal: 0 };
+const rock = { shape: rockShape(1), dmg: 0, rot: 0, size: 1, bright: 0, flash: 0, squash: 0, pop: 1, pause: 0, pauseMax: 1, boss: false, hurt: 0 };
+const game = { cool: 0, swing: 1, smear: 0, shake: 0, px: 0, py: 0, drillT: 0, goldShown: 0, incomeHist: [], helperAcc: 0, helperNext: 0, minis: [1, 1, 1, 1, 1, 1, 1, 1], coreBreakT: 0, lastFlashT: -999, lastShineT: -999 };
 const floaters = [];       // his mineral "clones" that float up and fade
-const boulders = [];       // cave-in rocks
-const ev = { rush: 0, vein: 0, next: 30 * 75 };
-const police = { state: "off", x: 0, walk: 0, purpose: null, quota: null, wait: 0 };
+const falling = [];        // cave-in rocks and meteors
+const ev = { rush: 0, rushMax: 1, vein: 0, veinMax: 10, frenzy: 0, frenzyMax: 1, next: 30 * 75 };
+const police = { state: "off", x: 0, walk: 0, purpose: null, quota: null };
 let introAt = 0;
 
 function newRock() {
   // his reset: turn right 1..180, brightness -15..0, size 650..750
   rock.shape = rockShape(randInt(1, 1e9));
-  rock.dmg = 0;
+  rock.dmg = 0; rock.hurt = 0;
   rock.rot = rand() * TAU;
   rock.size = randInt(650, 750) / 700;
   rock.bright = randInt(-15, 0);
   rock.pop = 0;
+  // boss rocks (never in his Rock Cave)
+  rock.boss = false;
+  if (S.layer >= 1 && S.layer <= 3) {
+    if (S.bossActive === S.layer) rock.boss = true;
+    else if (S.bossNext === S.layer) {
+      S.bossNext = -1; S.bossActive = S.layer; rock.boss = true;
+      SFX.roar(); shake(10);
+      banner("BOSS ROCK!", BOSSES[S.layer].name + " appears!", "#ff5a4a", 100);
+    }
+  }
+  if (rock.boss) rock.size = 1;
 }
 newRock();
 function overRock() { const r = lay.R * rock.size; return Math.hypot(mouse.x - lay.rockX, mouse.y - lay.rockY) <= r * 1.05; }
 function maxTierFound() { let t = -1; S.found.forEach((n, i) => { if (n > 0) t = Math.max(t, tierOf(MINERALS[i].rarity)); }); return t; }
 function shake(n) { if (settings.shake) game.shake = Math.max(game.shake, n); }
+function incomePerSec() { const h = game.incomeHist; const v = h.length > 1 ? (h[h.length - 1] - h[0]) / (h.length - 1) : 0; return isFinite(v) && v > 0 ? v : 0; }
+function eventSecs(base) { return base * (1 + 0.25 * eventBoost(S)); }
+function curHP() { return rockHP(S, rock.boss); }
 
 // ---------- mining ----------
-function hit() {
+function playerHit() {
   game.cool = hitInterval(S) - DT / 2;
   game.swing = 0; game.smear = 1;
   playHis("pickaxe", 0.7);
-  const ix = lay.rockX - lay.R * 0.78, iy = lay.rockY - lay.R * 0.15;
-  if (LAYERS[S.layer].core) {
+  applyHit(lay.rockX - lay.R * 0.78, lay.rockY - lay.R * 0.15, false);
+}
+function helperHit() {
+  const n = S.helper, i = game.helperNext++ % n;
+  game.minis[i] = 0;
+  SFX.tink();
+  applyHit(lay.rockX + lay.R * 0.7, lay.ground - 30 * lay.s, true);
+}
+function applyHit(ix, iy, byHelper) {
+  const L = LAYERS[S.layer];
+  const { d, crit } = hitDamage(S, rand, ev.frenzy > 0);
+  if (crit) { floatText(ix, iy - 30, "CRIT!", "#ff7a4a", 24); burstSparks(ix, iy, 10, "#ff9a4a", 8); SFX.crit(); shake(5); }
+  if (ev.frenzy > 0) burstSparks(ix, iy, 2, "#ffb040", 6);
+  if (L.core) {
     if (S.coreBroken) return;
-    S.coreHP -= pickPower(S);
-    rock.flash = 0.5; shake(3);
-    burstSparks(ix, iy, 6, "#ffcc55", 7);
-    if (T % 3 === 0) playHis("hitRock", 0.5);
+    S.coreHP = Math.max(0, S.coreHP - d);
+    rock.flash = 0.5; shake(byHelper ? 1 : 3);
+    burstSparks(ix, iy, byHelper ? 2 : 6, "#ffcc55", 7);
+    if (!byHelper && T % 3 === 0) playHis("hitRock", 0.5);
     if (S.coreHP <= 0) coreBreak();
     return;
   }
-  rock.dmg += pickPower(S);
-  rock.flash = 0.55; rock.squash = 1;
-  burstChips(ix, iy, 4, ROCK_PAL[S.layer]);
-  shake(2.5);
-  if (rock.dmg >= rockHP(S)) breakIt();
+  rock.dmg = Math.min(curHP(), rock.dmg + d);
+  rock.flash = byHelper ? 0.3 : 0.55; rock.squash = byHelper ? 0.5 : 1; rock.hurt = 1;
+  burstChips(ix, iy, byHelper ? 2 : 4, ROCK_PAL[S.layer]);
+  if (!byHelper) shake(2.5);
+  if (rock.dmg >= curHP()) { if (rock.boss) bossKill(); else breakIt(); }
+}
+// fewer big flashes when rare finds are common (deep down with lots of luck)
+function bigMoment(m) {
+  const list = LAYER_MINERALS[m.layer], rankFromTop = list.length - 1 - list.indexOf(m);
+  return tierOf(m.rarity) >= 5 && rankFromTop < 4;
 }
 function breakIt() {
   // his "Rock fully broken": stop sounds, crunch, a mineral pops out
   stopHis(); playHis("rockBreak");
   const id = breakRock(S, rand, { rush: ev.rush > 0, vein: ev.vein > 0 });
-  if (ev.vein > 0) ev.vein--;
+  if (ev.vein > 0) { ev.vein--; if (ev.vein === 0) linger("CRYSTAL VEIN", 0, "#4dc3ff"); }
   if (police.quota) police.quota.got++;
-  const m = MINERALS[id], tier = tierOf(m.rarity), isNew = S.found[id] === 1;
+  popMineral(id, lay.rockX, payout(S, id, ev.rush > 0));
   burstChips(lay.rockX, lay.rockY, 18, ROCK_PAL[S.layer], 1.4);
-  shake(6 + tier);
-  floaters.push({ id, life: 0, max: 20 + tier * 7, gained: payout(S, id, ev.rush > 0), isNew });
-  SFX.find(tier);
-  if (tier >= 2) burstSparks(lay.rockX, lay.rockY - lay.R, 6 + tier * 4, rarityGlowColor(m.rarity, T / 30), 5 + tier);
-  if (tier >= 5) {
-    playHis("shine", 0.7);
-    ui.flash = { c: rarityGlowColor(m.rarity, T / 30), a: 0.15 + tier * 0.04 };
-    banner(m.rarity.toUpperCase() + "!", m.name, rarityGlowColor(m.rarity, T / 30), 70);
-  } else if (isNew) banner("NEW MINERAL", m.name, rarityColor(m.rarity, T / 30), 60);
-  rock.pause = BREAK_PAUSE_TICKS;
+  rock.pause = rock.pauseMax = BREAK_PAUSE_TICKS;
   anims.goldbump = 1;
+}
+function popMineral(id, x, gained, delay = 0) {
+  const m = MINERALS[id], tier = tierOf(m.rarity), isNew = S.found[id] === 1;
+  floaters.push({ id, x, life: -delay, max: 20 + tier * 7, gained, isNew });
+  shake(Math.min(12, 6 + tier));
+  SFX.find(tier);
+  if (tier >= 2) burstSparks(x, lay.rockY - lay.R, 6 + tier * 4, rarityGlowColor(m.rarity, T / 30), 5 + tier);
+  const big = bigMoment(m);
+  if ((big || (isNew && tier >= 5)) && T - game.lastShineT > 45) { playHis("shine", 0.7); game.lastShineT = T; }
+  if ((big || isNew) && T - game.lastFlashT > 50) {
+    game.lastFlashT = T;
+    if (tier >= 5) { ui.flash = { c: rarityGlowColor(m.rarity, T / 30), a: 0.15 + tier * 0.03 }; banner(m.rarity.toUpperCase() + "!", m.name, rarityGlowColor(m.rarity, T / 30), 70); }
+    else banner("NEW MINERAL", m.name, rarityColor(m.rarity, T / 30), 60);
+  }
+}
+function bossKill() {
+  const L = S.layer, first = S.bossKills[L] === 0;
+  stopHis(); playHis("rockBreak"); playHis("cobble"); SFX.boom(); SFX.levelUp();
+  const ids = bossLoot(S, rand);
+  S.bossActive = -1;
+  ids.forEach((id, i) => popMineral(id, lay.rockX + (i - 2) * lay.R * 0.45, payout(S, id, false), i * 6));
+  burstChips(lay.rockX, lay.rockY, 40, ROCK_PAL[L], 2);
+  burstSparks(lay.rockX, lay.rockY, 40, "#ffd060", 10);
+  shake(16);
+  banner("BOSS DEFEATED!", BOSSES[L].name, "#ffd447", 110);
+  if (first) { const sk = SKINS.find(k => k.boss === L); if (sk && !S.skins[sk.id]) { S.skins[sk.id] = true; ui.toasts.push({ title: "NEW PICKAXE SKIN", name: sk.name, icon: "pick" }); } }
+  rock.pause = rock.pauseMax = 18;
+  anims.goldbump = 1;
+  save();
 }
 function coreBreak() {
   S.coreHP = 0; S.coreBroken = true;
-  S.found[CORE_MINERAL]++;
+  noteFind(S, CORE_MINERAL);
   addGold(S, payout(S, CORE_MINERAL, false));
   SFX.boom(); playHis("rockBreak"); playHis("cobble");
   shake(30);
   ui.flash = { c: "#ffffff", a: 1 };
+  game.coreBreakT = 40;
   burstSparks(lay.rockX, lay.rockY, 120, "#ffd060", 14);
   burstChips(lay.rockX, lay.rockY, 40, { body: "#5a3a2c", light: "#8a5a3a" }, 2.2);
   confetti(160);
-  floaters.push({ id: CORE_MINERAL, life: 0, max: 140, gained: payout(S, CORE_MINERAL, false), isNew: true });
+  floaters.push({ id: CORE_MINERAL, x: lay.rockX, life: 0, max: 140, gained: payout(S, CORE_MINERAL, false), isNew: true });
   save();
-  setTimeout(() => startPolice("ending"), 2200);
+  ui.pendingEnding = 30 * 2.2;
 }
 function confetti(n) { const cols = ["#ffcc33", "#ff5a4a", "#7dff6a", "#4dc3ff", "#ff7af0", "#ffffff"]; for (let i = 0; i < n; i++) addPart({ k: "confetti", x: rand() * W, y: lay.hud - rand() * 200, vx: (rand() - 0.5) * 4, vy: rand() * 3, rot: rand() * TAU, vr: (rand() - 0.5) * 0.3, c: cols[i % cols.length], life: 0, max: 160 + rand() * 80 }); }
 
-// ---------- shop buttons ----------
+// ---------- shop ----------
+const SHOP_TABS = [
+  { name: "Pickaxe", keys: ["mult", "speed", "pick", "crit", "luck"] },
+  { name: "Helpers", keys: ["drill", "helper", "event"] },
+  { name: "Depths",  keys: ["gear", "dig"] },
+];
 const SPEED_NAMES = ["+10% mining speed", "+25% mining speed", "+50% mining speed", "+75% mining speed", "+100% mining speed"];
-function cardInfo(k) {
-  const lv = S[k], list = UPG[k], next = list && list[lv];
-  const base = { k, level: lv, max: list ? list.length : 0, cost: nextCost(S, k), sold: !next };
+const ICON_OF = { mult: "mult", speed: "speed", drill: "drill", pick: "pick", crit: "crit", luck: "luck", helper: "helper", event: "event", gear: "gear" };
+function upgradeText(k, n) {
   switch (k) {
-    case "mult": return Object.assign(base, { icon: "mult", title: next ? (next.label || `X${next.v} Money multiplier`) : "Money multiplier", sub: next ? `Every mineral is worth x${next.v} (now x${goldMult(S)})` : `Maxed at x${goldMult(S)}` });
-    case "speed": return Object.assign(base, { icon: "speed", title: next ? SPEED_NAMES[lv] : "Mining speed", sub: next ? `A hit every ${(speedOf(S).breaking).toFixed(2)}s → ${next.breaking.toFixed(2)}s` : "As fast as a pickaxe can go" });
-    case "drill": return Object.assign(base, { icon: "drill", title: next ? (next.label || `Drill MK ${lv + 1}`) : "Drill", sub: next ? (next.sub || `+${next.v} Gold P/S`) + ` (now ${fmt(drillPPS(S))}/s)` : `${fmt(drillPPS(S))} Gold per second` });
-    case "pick": return Object.assign(base, { icon: "pick", title: next ? next.label : "Rektium pickaxe", sub: next ? `${next.v} damage per hit (now ${pickPower(S)})` : `${pickPower(S)} damage per hit` });
-    case "luck": return Object.assign(base, { icon: "luck", title: next ? next.label : "Lucky charm III", sub: next ? `Roll ${next.v} minerals, keep the rarest` : `${luckRolls(S)} rolls per rock` });
-    case "dig": {
-      if (S.maxLayer < LAYERS.length - 1) return { k, icon: "dig", level: S.maxLayer, max: LAYERS.length - 1, cost: nextCost(S, "dig"), sold: false, title: `Dig to ${LAYERS[S.maxLayer + 1].name}`, sub: S.maxLayer + 1 === 4 ? "The very bottom. Something glows down there..." : `Tougher rocks, ${LAYER_MINERALS[S.maxLayer + 1].length} new minerals` };
-      if (!S.coreBroken) return { k, icon: "dig", level: 4, max: 4, cost: Infinity, sold: false, locked: true, title: "Break the Core!", sub: `${fmt(S.coreHP)} / ${fmt(CORE_HP)} HP left` };
-      return { k, icon: "rebirth", level: S.rebirths, max: 0, cost: 0, sold: false, rebirth: true, title: "REBIRTH", sub: `Start over with x${rebirthMult(S) * 2} gold forever` };
-    }
+    case "mult": return [`X${n.v} Money multiplier`, `Every mineral is worth x${n.v} (now x${goldMult(S)})`];
+    case "speed": return [SPEED_NAMES[UPG.speed.indexOf(n)], `A hit every ${speedOf(S).breaking.toFixed(2)}s → ${n.breaking.toFixed(2)}s`];
+    case "drill": return [n.label || `Drill MK ${UPG.drill.indexOf(n) + 1}`, `+${fmt(n.v)} Gold P/S (now ${fmt(drillPPS(S))}/s)`];
+    case "pick": return [n.label, `${n.v + perk(S, "power")} damage per hit (now ${pickPower(S)})`];
+    case "crit": return [n.label, `${Math.round(n.v * 100)}% chance a hit does x${CRIT_MULT} damage`];
+    case "luck": return [n.label, `Roll ${n.v + perk(S, "luck")} minerals, keep the rarest`];
+    case "helper": return [n.label, `Mini miners hit ${n.v}x per second on their own`];
+    case "event": return [n.label, `Events last ${25 * n.v}% longer and come more often`];
+    case "gear": return [n.label, n.sub];
   }
 }
+function maxedText(k) {
+  return { mult: `Maxed at x${goldMult(S)}`, speed: "As fast as a pickaxe can go", drill: `${fmt(drillPPS(S))} Gold per second`, pick: `${pickPower(S)} damage per hit`, crit: `${Math.round(critChance(S) * 100)}% crit chance`, luck: `${luckRolls(S)} rolls per rock`, helper: `${helperHPS(S)} hits per second`, event: "Events +75% longer", gear: "You have all the gear" }[k];
+}
+const TITLE_OF = { mult: "Money multiplier", speed: "Mining speed", drill: "Drill", pick: "Pickaxe", crit: "Sharp eye", luck: "Lucky charm", helper: "Mini miners", event: "Lucky lantern", gear: "Gear" };
+function cardInfo(k) {
+  if (k === "dig") {
+    if (S.maxLayer < LAYERS.length - 1) return { k, icon: "dig", level: S.maxLayer, max: LAYERS.length - 1, cost: nextCost(S, "dig"), title: `Dig to ${LAYERS[S.maxLayer + 1].name}`, sub: S.maxLayer + 1 === 4 ? "The very bottom. Something glows down there..." : `Tougher rocks, ${LAYER_MINERALS[S.maxLayer + 1].length} new minerals, a boss` };
+    if (!S.coreBroken) return { k, icon: "dig", level: 4, max: 4, cost: Infinity, locked: true, title: "Break the Core!", sub: `${fmt(S.coreHP)} / ${fmt(CORE_HP)} HP left` };
+    return { k, icon: "rebirth", level: 0, max: 0, cost: 0, rebirth: true, title: "REBIRTH", sub: `Start over: x${fmt(Math.pow(2, S.rebirths + 1))} gold, +${STARS_PER_REBIRTH} stars` };
+  }
+  const lv = S[k], list = UPG[k], next = list[lv];
+  const info = { k, icon: ICON_OF[k], level: lv, max: list.length, cost: nextCost(S, k) };
+  if (!next) return Object.assign(info, { sold: true, title: TITLE_OF[k], sub: maxedText(k) });
+  const [title, sub] = upgradeText(k, next);
+  if (tierLocked(S, k)) return Object.assign(info, { locked: true, title, sub: `Dig to the ${LAYERS[next.depth].name} to unlock` });
+  return Object.assign(info, { title, sub });
+}
+const canAfford = c => !c.sold && !c.locked && !c.rebirth && S.gold >= c.cost;
 function tryBuy(k, rect) {
+  if (!ui.shop || ui.trans) return;
   const info = cardInfo(k);
-  if (info.rebirth) { ui.confirm = { title: "Rebirth?", text: ["Gold, upgrades and depth reset.", "You keep your Mineral Index and trophies.", `All gold x${rebirthMult(S) * 2} forever!`], yes: doRebirth }; openModal("confirm"); return; }
+  if (info.rebirth) { askRebirth(); return; }
   if (info.sold || info.locked) { SFX.deny(); anims["shake_" + k] = 1; return; }
   const prevLayer = S.layer;
   if (!buy(S, k)) { SFX.deny(); anims["shake_" + k] = 1; return; }
@@ -1291,45 +1590,70 @@ function tryBuy(k, rect) {
   if (k === "dig") { const to = S.layer; S.layer = prevLayer; SFX.levelUp(); goLayer(to, true); }
   save();
 }
+function askRebirth() { ui.confirm = { title: "Rebirth?", text: ["Gold, upgrades and depth reset.", "You keep minerals, trophies, skins, badges and perks.", `All gold x${fmt(Math.pow(2, S.rebirths + 1))} forever, +${STARS_PER_REBIRTH} Rebirth stars!`], yes: doRebirth }; openModal("confirm"); }
 function doRebirth() {
+  const prev = S.layer;
   S = rebirth(S);
+  // reset everything that belongs to the old run
+  ev.rush = 0; ev.vein = 0; ev.frenzy = 0; music.rush = false; ev.next = 30 * 75;
+  falling.length = 0; floaters.length = 0; ui.linger = []; ui.banner = null; ui.dialog = null;
+  police.state = "off"; police.quota = null;
+  game.goldShown = S.gold; game.incomeHist = []; game.helperAcc = 0; game.coreBreakT = 0; ui.pendingEnding = 0;
+  rock.boss = false;
   SFX.levelUp(); confetti(120);
-  ev.rush = 0; ev.vein = 0; music.rush = false;
+  S.layer = Math.min(prev, LAYERS.length - 1);   // shown until the fade finishes
   goLayer(0, true);
-  game.goldShown = 0;
   save();
+  setTimeout(() => { if (S.stars > 0) openModal("perks"); }, 1200);
 }
-function goLayer(L, announce) { ui.trans = { t: 0, to: L, announce }; }
+function goLayer(L, announce) { if (ui.trans) return; ui.trans = { t: 0, to: L, announce }; }
 
 // ---------- events ----------
 function banner(title, sub, color, dur = 90, icon) { ui.banner = { title, sub, color, t: 0, max: dur, icon }; }
+function linger(text, f, color) { ui.linger.push({ text, f, color, t: 30 }); }
 function startEvent(force) {
-  const opts = ["rush", "cavein", "vein"];
+  const opts = ["rush", "cavein", "vein", "meteor", "frenzy"];
   if (S.police && S.speed >= 3 && police.state === "off" && !LAYERS[S.layer].core) opts.push("quota", "quota");
-  const e = force || opts[Math.floor(rand() * opts.length)];
-  if (e === "rush") { ev.rush = 30 * 20; music.rush = true; SFX.alarm(); banner("GOLD RUSH!", "Everything is worth x3 for 20 seconds", "#ffcc33", 100, "rush"); award("rush"); }
-  if (e === "vein") { ev.vein = 10; SFX.find(3); banner("CRYSTAL VEIN!", "The next 10 rocks are extra lucky", "#4dc3ff", 100, "vein"); }
+  let e = force || opts[Math.floor(rand() * opts.length)];
+  // no doubling up on the same event
+  if (!force && ((e === "rush" && ev.rush > 0) || (e === "vein" && ev.vein > 0) || (e === "frenzy" && ev.frenzy > 0) || ((e === "cavein" || e === "meteor") && falling.length))) return;
+  if (e === "rush") { ev.rush = ev.rushMax = Math.round(30 * eventSecs(20)); music.rush = true; SFX.alarm(); banner("GOLD RUSH!", `Everything is worth x3 for ${Math.round(eventSecs(20))} seconds`, "#ffcc33", 100, "rush"); award("rush"); }
+  if (e === "vein") { ev.vein = ev.veinMax = Math.round(10 * (1 + 0.25 * eventBoost(S))); SFX.find(3); banner("CRYSTAL VEIN!", `The next ${ev.vein} rocks are extra lucky`, "#4dc3ff", 100, "vein"); }
+  if (e === "frenzy") { ev.frenzy = ev.frenzyMax = Math.round(30 * eventSecs(15)); SFX.alarm(); banner("PICKAXE FRENZY!", `Double damage for ${Math.round(eventSecs(15))} seconds`, "#ff8a2a", 100, "frenzy"); award("frenzy"); }
   if (e === "cavein") {
     SFX.rumble(); playHis("cobble"); shake(14);
     banner("CAVE-IN!", "Click the falling rocks to smash them!", "#ff7a4a", 100, "cavein");
     const n = randInt(5, 8);
-    for (let i = 0; i < n; i++) boulders.push({ x: lay.sceneL + 60 + rand() * (W - lay.sceneL - 120), y: lay.hud - 60 - rand() * 400, vy: 0, r: (24 + rand() * 14) * lay.s * 1.2, shape: rockShape(randInt(1, 1e9)), rot: rand() * TAU, vr: (rand() - 0.5) * 0.1, landed: 0 });
+    for (let i = 0; i < n; i++) falling.push({ kind: "rock", x: lay.sceneL + 60 + rand() * (W - lay.sceneL - 120), y: lay.hud - 60 - rand() * 400, vx: 0, vy: 0, r: (24 + rand() * 14) * lay.s * 1.2, shape: rockShape(randInt(1, 1e9)), rot: rand() * TAU, vr: (rand() - 0.5) * 0.1, landed: 0 });
+  }
+  if (e === "meteor") {
+    SFX.whoosh();
+    banner("METEOR SHOWER!", "Click the meteors for rare minerals!", "#ff9a3a", 100, "meteor");
+    const n = randInt(3, 5);
+    for (let i = 0; i < n; i++) falling.push({ kind: "meteor", x: lay.sceneL + 200 + rand() * (W - lay.sceneL), y: lay.hud - 80 - i * 160 - rand() * 80, vx: -3 - rand() * 2, vy: 4, r: 20 * lay.s * 1.2, landed: 0 });
   }
   if (e === "quota") startPolice("quota");
 }
 function scenePress() {
-  for (let i = boulders.length - 1; i >= 0; i--) {
-    const b = boulders[i];
-    if (Math.hypot(mouse.x - b.x, mouse.y - b.y) <= b.r * 1.25) {
-      boulders.splice(i, 1);
+  for (let i = falling.length - 1; i >= 0; i--) {
+    const b = falling[i];
+    if (Math.hypot(mouse.x - b.x, mouse.y - b.y) > b.r * 1.3) continue;
+    falling.splice(i, 1);
+    mouse.ui = true;
+    if (b.kind === "meteor") {
+      SFX.boom(); playHis("punch", 0.6);
+      burstSparks(b.x, b.y, 30, "#ffb040", 8);
+      const L = Math.min(S.layer, 3), id = rollMineral(L, luckRolls(S) + 3, rand), g = payout(S, id, ev.rush > 0) * 3;
+      addGold(S, g); noteFind(S, id); S.meteors++;
+      popMineral(id, b.x, g);
+    } else {
       playHis("punch", 0.8); SFX.boom();
       burstChips(b.x, b.y, 14, ROCK_PAL[Math.min(S.layer, 3)], 1.1);
       const g = payout(S, rollMineral(Math.min(S.layer, 3), luckRolls(S), rand), ev.rush > 0) * 2;
       addGold(S, g); S.boulders++;
       floatText(b.x, b.y - b.r, "+" + fmt(g), "#ffcc33", 22);
-      mouse.ui = true;
-      return;
     }
+    return;
   }
 }
 
@@ -1339,14 +1663,14 @@ function startPolice(purpose) {
   police.state = "in"; police.purpose = purpose; police.x = W + 80; police.walk = 0;
   if (purpose !== "intro") SFX.whistle();
 }
-function say(lines, onDone) { ui.dialog = { lines, i: 0, ch: 0, idle: 0, onDone }; }
+function say(lines, onDone) { ui.dialog = { lines, i: 0, ch: 0, idle: 0, onDone }; anims.dlgA = 0; }
 function policeArrived() {
   const p = police;
-  if (p.purpose === "intro") say(INTRO, () => { award("police"); p.state = "out"; S.police = true; save(); });
+  if (p.purpose === "intro") say(INTRO.concat([["police", "From now on I'll leave you orders. Check them at the board."]]), () => { award("police"); p.state = "out"; S.police = true; fillQuests(); save(); });
   else if (p.purpose === "quota") {
-    const per = (Math.ceil(rockHP(S) / pickPower(S)) * hitInterval(S) + 0.1);
+    const per = (Math.ceil(curHP() / pickPower(S)) * hitInterval(S) + 0.1);
     const need = clamp(Math.floor(30 / per * 0.7), 5, 40);
-    say([["police", `ROCK INSPECTION! Break ${need} rocks in 30 seconds.`], ["you", "Uh... okay?"]], () => { p.quota = { need, got: 0, t: 30 * 30 }; p.state = "stand"; banner("ROCK INSPECTION", `Break ${need} rocks in 30 seconds`, "#9ab0ff", 80, "police"); });
+    say([["police", `ROCK INSPECTION! Break ${need} rocks in 30 seconds.`], ["you", "Uh... okay?"]], () => { p.quota = { need, got: 0, t: Math.round(30 * eventSecs(30)), max: Math.round(30 * eventSecs(30)) }; p.state = "stand"; banner("ROCK INSPECTION", `Break ${need} rocks!`, "#9ab0ff", 80, "police"); });
   } else if (p.purpose === "ending") {
     say([["police", "..."], ["police", "You broke the CORE?!"], ["you", "Huh?! Was I not supposed to?"], ["police", "Nobody has ever done that. Not even the Rock police."], ["police", "...That's it. You're promoted. You are the Rock police now."]],
       () => { p.state = "out"; award("core"); openModal("ending"); SFX.levelUp(); confetti(100); });
@@ -1357,20 +1681,62 @@ function quotaTick() {
   q.t--;
   if (q.got >= q.need) {
     police.quota = null;
-    const perSec = Math.max(500, (game.incomeHist.length > 1 ? (game.incomeHist[game.incomeHist.length - 1] - game.incomeHist[0]) / (game.incomeHist.length - 1) : 0));
-    const reward = Math.floor(perSec * 60);
-    addGold(S, reward); S.quotas++;
+    linger(`INSPECTION: ${q.need} / ${q.need}`, 1, "#7dff6a");
+    const reward = Math.floor(Math.max(500, incomePerSec()) * 60);
+    addGold(S, reward); S.quotas++; S.badges += 1;
     SFX.buy(); SFX.levelUp();
-    say([["police", "Hmm. Good rock breaking."], ["police", `Here's ${fmt(reward)} Gold. Keep it up.`]], () => { police.state = "out"; });
+    say([["police", "Hmm. Good rock breaking."], ["police", `Here's ${fmt(reward)} Gold and a police badge.`]], () => { police.state = "out"; });
     save();
   } else if (q.t <= 0) {
     police.quota = null;
+    linger(`INSPECTION: ${q.got} / ${q.need}`, q.got / q.need, "#ff6a5a");
     SFX.deny();
     say([["police", "Hmph. Too slow."], ["police", "The Rock police is watching you..."]], () => { police.state = "out"; });
   }
 }
 
-// ---------- achievements ----------
+// ---------- Rock police orders (quests) ----------
+// Each order remembers the counter value when it was given ("base"),
+// so progress = counter now - base.
+const QUEST_KINDS = {
+  rocks:   { badges: 1, count: s => s.rocks, text: q => `Break ${q.n} rocks` },
+  tier:    { badges: 2, count: (s, q) => s.tierFinds.slice(q.tier).reduce((a, b) => a + b, 0), text: q => `Find ${q.n} ${RARITIES[q.tier]}+ mineral${q.n > 1 ? "s" : ""}` },
+  gold:    { badges: 1, count: s => s.totalGold, text: q => `Earn ${fmt(q.n)} Gold` },
+  falling: { badges: 2, count: s => s.boulders + s.meteors, text: q => `Smash ${q.n} cave-in rocks or meteors` },
+  depth:   { badges: 1, count: (s, q) => s.depthRocks[q.L], text: q => `Break ${q.n} rocks in the ${LAYERS[q.L].name}` },
+  boss:    { badges: 3, count: s => s.bossKills.reduce((a, b) => a + b, 0), text: () => "Defeat a boss rock" },
+  crit:    { badges: 1, count: s => s.crits, text: q => `Land ${q.n} critical hits` },
+};
+function makeQuest() {
+  const have = S.quests.map(q => q.type);
+  const kinds = ["rocks", "tier", "gold", "falling", "depth"];
+  if (S.maxLayer >= 1) kinds.push("boss");
+  if (S.crit > 0) kinds.push("crit");
+  const free = kinds.filter(k => !have.includes(k));
+  const type = free[Math.floor(rand() * free.length)] || "rocks";
+  const q = { type, n: 1, base: 0, L: Math.min(S.maxLayer, 3), tier: 2 };
+  if (type === "rocks") q.n = [30, 60, 120][randInt(0, 2)];
+  if (type === "tier") { q.tier = clamp(maxTierFound() - randInt(0, 2), 2, 11); q.n = randInt(1, 3); }
+  if (type === "gold") q.n = Math.max(1000, Math.round(incomePerSec() * 120));
+  if (type === "falling") q.n = 5;
+  if (type === "depth") q.n = 40;
+  if (type === "crit") q.n = 50;
+  q.base = QUEST_KINDS[type].count(S, q);
+  return q;
+}
+function fillQuests() { if (!S.police) return; S.quests = S.quests.filter(q => QUEST_KINDS[q.type]); while (S.quests.length < 3) S.quests.push(makeQuest()); }
+const questProg = q => clamp(QUEST_KINDS[q.type].count(S, q) - q.base, 0, q.n);
+function claimQuest(i) {
+  const q = S.quests[i]; if (!q || questProg(q) < q.n) return;
+  const b = QUEST_KINDS[q.type].badges, g = Math.floor(Math.max(200, incomePerSec()) * 30);
+  S.badges += b; addGold(S, g); S.questsDone++;
+  S.quests.splice(i, 1, makeQuest());
+  SFX.buy(); SFX.levelUp(); confetti(30);
+  floatText(W / 2, H / 2, `+${b} badge${b > 1 ? "s" : ""}  +${fmt(g)} Gold`, "#ffd447", 26);
+  save();
+}
+
+// ---------- trophies ----------
 const ACH = [
   { id: "first", name: "First Crack", desc: "Break your first rock", test: s => s.rocks >= 1 },
   { id: "r100", name: "Rock Breaker", desc: "Break 100 rocks", test: s => s.rocks >= 100 },
@@ -1391,18 +1757,35 @@ const ACH = [
   { id: "void", name: "Into the Void", desc: "Reach The Void", test: s => s.maxLayer >= 3 },
   { id: "core", name: "Core Breaker", desc: "Break the Core", test: s => s.coreBroken },
   { id: "reborn", name: "Born Again", desc: "Rebirth once", test: s => s.rebirths >= 1 },
+  { id: "reborn5", name: "Again and Again", desc: "Rebirth 5 times", test: s => s.rebirths >= 5 },
   { id: "idx0", name: "Collector", desc: "Find every mineral in the Rock Cave", test: s => LAYER_MINERALS[0].every(m => s.found[m.id] > 0) },
   { id: "idxAll", name: "Geologist", desc: "Find every single mineral", test: s => s.found.every(n => n > 0) },
   { id: "boulder", name: "Cave-in Survivor", desc: "Smash 10 cave-in rocks", test: s => s.boulders >= 10 },
+  { id: "meteor", name: "Star Catcher", desc: "Catch 5 meteors", test: s => s.meteors >= 5 },
   { id: "quota", name: "Law Abiding", desc: "Pass 3 Rock inspections", test: s => s.quotas >= 3 },
+  { id: "order1", name: "On Duty", desc: "Finish a Rock police order", test: s => s.questsDone >= 1 },
+  { id: "order10", name: "Sergeant", desc: "Finish 10 Rock police orders", test: s => s.questsDone >= 10 },
+  { id: "boss1", name: "Basalt Breaker", desc: "Defeat The Big Basalt", test: s => s.bossKills[1] >= 1 },
+  { id: "boss2", name: "Regicide", desc: "Defeat the Magma King", test: s => s.bossKills[2] >= 1 },
+  { id: "boss3", name: "Eye Poke", desc: "Defeat The Void Eye", test: s => s.bossKills[3] >= 1 },
+  { id: "boss10", name: "Boss Hunter", desc: "Defeat 10 boss rocks", test: s => s.bossKills.reduce((a, b) => a + b, 0) >= 10 },
+  { id: "helper", name: "Hired Help", desc: "Hire a Mini miner", test: s => s.helper >= 1 },
+  { id: "crew", name: "Mining Crew", desc: "Have 4 Mini miners", test: s => s.helper >= 4 },
+  { id: "crit", name: "Critical Hit", desc: "Land a critical hit", test: s => s.crits >= 1 },
+  { id: "crit1k", name: "Sharp Shooter", desc: "Land 1 000 critical hits", test: s => s.crits >= 1000 },
+  { id: "gear", name: "Fully Geared", desc: "Own all four pieces of gear", test: s => s.gear >= 4 },
+  { id: "skin3", name: "Fashion Miner", desc: "Own 3 pickaxe skins", test: s => SKINS.filter(k => s.skins[k.id]).length >= 3 },
+  { id: "skinAll", name: "Collector's Edition", desc: "Own every pickaxe skin", test: s => SKINS.every(k => s.skins[k.id]) },
+  { id: "perk", name: "Perky", desc: "Buy a Rebirth perk", test: s => Object.keys(s.perks).length > 0 },
   { id: "rush", name: "Gold Fever", desc: "Be there for a Gold Rush", test: () => false },
+  { id: "frenzy", name: "Frenzy!", desc: "Be there for a Pickaxe Frenzy", test: () => false },
   { id: "police", name: "Who Are You??", desc: "Meet the Rock police", test: () => false },
 ];
 function award(id) {
   if (S.ach[id]) return;
   const a = ACH.find(a => a.id === id); if (!a) return;
   S.ach[id] = true;
-  ui.toasts.push({ a, t: 0 });
+  ui.toasts.push({ title: "TROPHY UNLOCKED", name: a.name, icon: "trophy" });
   SFX.levelUp();
   save();
 }
@@ -1419,63 +1802,84 @@ function tick() {
   if (ui.flash) { ui.flash.a *= 0.9; if (ui.flash.a < 0.01) ui.flash = null; }
   if (ui.banner && ++ui.banner.t >= ui.banner.max) ui.banner = null;
   if (ui.toasts.length && ++ui.toasts[0].t > 120) ui.toasts.shift();
+  for (let i = ui.linger.length - 1; i >= 0; i--) if (--ui.linger[i].t <= 0) ui.linger.splice(i, 1);
   if (ui.layerCard > 0) ui.layerCard--;
   if (ui.resetArmed > 0) ui.resetArmed--;
   if (ui.trans) {
     const tr = ui.trans; tr.t++;
     if (tr.t === 14) {
-      S.layer = tr.to; caveCache = null; music.layer = S.layer; boulders.length = 0; floaters.length = 0; police.state = police.state === "stand" ? "off" : police.state; police.quota = null;
+      S.layer = tr.to; caveCache = null; music.layer = S.layer; falling.length = 0; floaters.length = 0; ui.linger = [];
+      if (police.state === "stand") { police.state = "off"; police.quota = null; ui.dialog = null; }
       rock.pause = 0; newRock(); computeLayout();
       if (tr.announce) { ui.layerCard = 110; SFX.levelUp(); }
     }
     if (tr.t >= 28) ui.trans = null;
   }
-  if (screen !== "game") { game.swing = Math.min(1, game.swing + 0.05); if (T % 25 === 0) { game.swing = 0; } return; }
+  if (screen !== "game") return;
 
   S.time += DT;
   // mining (hold the mouse on the rock, or hold Space)
   if (rock.pause > 0 && --rock.pause === 0) newRock();
+  if (game.coreBreakT > 0) game.coreBreakT--;
   game.cool -= DT;
-  const mining = !ui.modal && !ui.trans && ((mouse.down && !mouse.ui && overRock()) || spaceDown);
-  const coreDone = LAYERS[S.layer].core && S.coreBroken;
-  if (mining && !coreDone && rock.pause === 0 && game.cool <= 0) hit();
+  const L = LAYERS[S.layer];
+  const coreDone = L.core && S.coreBroken;
+  const canMine = !ui.modal && !ui.trans && !coreDone && rock.pause === 0;
+  const mining = canMine && ((mouse.down && !mouse.ui && overRock()) || spaceDown);
+  if (mining && game.cool <= 0) playerHit();
+  // mini miners work on their own
+  if (S.helper > 0 && !ui.trans && !coreDone) {
+    game.helperAcc += helperHPS(S) * DT;
+    while (game.helperAcc >= 1) { game.helperAcc -= 1; if (rock.pause === 0 && !(L.core && S.coreBroken)) helperHit(); }
+  }
+  for (let i = 0; i < game.minis.length; i++) game.minis[i] = Math.min(1, game.minis[i] + 0.12);
   // pickaxe swing: down on the hit, back up before the next one (his 2 costumes)
   game.swing = Math.min(1, game.swing + DT / Math.max(hitInterval(S) * 0.8, DT * 2));
   game.smear *= 0.7;
-  rock.flash *= 0.7; rock.squash *= 0.75; rock.pop = Math.min(1, rock.pop + 0.12);
+  rock.flash *= 0.7; rock.squash *= 0.75; rock.hurt *= 0.85; rock.pop = Math.min(1, rock.pop + 0.12);
   for (const f of floaters) f.life++;
-  while (floaters.length && floaters[0].life >= floaters[0].max) floaters.shift();
+  for (let i = floaters.length - 1; i >= 0; i--) if (floaters[i].life >= floaters[i].max) floaters.splice(i, 1);
 
   // drill income
   const pps = drillPPS(S);
   if (pps > 0) {
     addGold(S, pps * DT);
     if (++game.drillT >= 30) { game.drillT = 0; floatText(lay.drillX + 30 * lay.s, lay.ground - 90 * lay.s, "+" + fmt(pps), "#ffcc33", 15); }
-    if (T % 4 === 0) burstSparks(lay.rockX + lay.R * 0.95, lay.ground - 48 * lay.s, 1, "#ffd27a", 4);
+    if (T % 4 === 0 && !L.core) burstSparks(lay.rockX + lay.R * 0.95, lay.ground - 48 * lay.s, 1, "#ffd27a", 4);
   }
   if (T % 30 === 0) { game.incomeHist.push(S.totalGold); if (game.incomeHist.length > 61) game.incomeHist.shift(); }
 
-  // events
-  if (ev.rush > 0 && --ev.rush === 0) music.rush = false;
+  // timed events
+  if (ev.rush > 0 && --ev.rush === 0) { music.rush = false; linger("GOLD RUSH x3", 0, "#ffcc33"); }
+  if (ev.frenzy > 0 && --ev.frenzy === 0) linger("PICKAXE FRENZY x2", 0, "#ff8a2a");
   if (ev.rush > 0 && T % 3 === 0) addPart({ k: "ember", x: rand() * W, y: H, vx: 0, vy: -2 - rand() * 2, c: "#ffcc33", life: 0, max: 120 });
   if ((S.layer === 2 || S.layer === 4) && T % 4 === 0) addPart({ k: "ember", x: rand() * W, y: H - 20, vx: (rand() - 0.5), vy: -1 - rand() * 1.5, c: "#ff8a2a", life: 0, max: 140 });
-  if (!ui.dialog && police.state === "off" && !ui.trans && !(LAYERS[S.layer].core && !S.coreBroken)) { if (--ev.next <= 0) { ev.next = 30 * randInt(70, 140); startEvent(); } }
-  for (let i = boulders.length - 1; i >= 0; i--) {
-    const b = boulders[i];
-    if (b.landed) { if (++b.landed > 30 * 9) { burstChips(b.x, b.y, 6, ROCK_PAL[0], 0.6); boulders.splice(i, 1); } continue; }
-    b.vy += 0.5; b.y += b.vy; b.rot += b.vr;
-    if (b.y >= lay.ground - b.r) { b.y = lay.ground - b.r; if (b.vy > 4) { b.vy *= -0.3; shake(4); burstChips(b.x, b.y + b.r, 4, ROCK_PAL[0], 0.6); playHis("punch", 0.3); } else b.landed = 1; }
+  // the next random event (paused while a menu, dialog or depth change is open)
+  const quiet = !ui.dialog && !ui.modal && police.state === "off" && !ui.trans && !(L.core && !S.coreBroken) && !rock.boss;
+  if (quiet && --ev.next <= 0) { ev.next = Math.round(30 * randInt(70, 140) / (1 + 0.15 * eventBoost(S))); startEvent(); }
+  for (let i = falling.length - 1; i >= 0; i--) {
+    const b = falling[i];
+    if (b.landed) { if (++b.landed > 30 * 9) { if (b.kind === "rock") burstChips(b.x, b.y, 6, ROCK_PAL[0], 0.6); else burstSparks(b.x, b.y, 8, "#ff8a2a", 3); falling.splice(i, 1); } continue; }
+    if (b.kind === "meteor") { b.x += b.vx; b.y += b.vy; b.vy += 0.15; if (T % 2 === 0) addPart({ k: "ember", x: b.x, y: b.y, vx: -b.vx * 0.2, vy: -1, c: "#ffb040", life: 0, max: 25 }); }
+    else { b.vy += 0.5; b.y += b.vy; b.rot += b.vr; }
+    if (b.y >= lay.ground - b.r) {
+      b.y = lay.ground - b.r;
+      if (b.kind === "meteor") { b.landed = 1; shake(6); burstSparks(b.x, b.y + b.r, 16, "#ffb040", 6); SFX.boom(); }
+      else if (b.vy > 4) { b.vy *= -0.3; shake(4); burstChips(b.x, b.y + b.r, 4, ROCK_PAL[0], 0.6); playHis("punch", 0.3); }
+      else b.landed = 1;
+    }
   }
 
   // Rock police: first visit after a random 1-10 seconds (his Player2 wait)
-  if (!S.police && police.state === "off" && S.time > introAt) startPolice("intro");
+  if (!S.police && police.state === "off" && S.time > introAt && !ui.modal && !ui.trans) startPolice("intro");
   if (police.state === "in") { police.walk += 0.25; police.x -= 6 * lay.s; if (police.x <= lay.policeX) { police.x = lay.policeX; police.state = "stand"; policeArrived(); } }
   else if (police.state === "stand") { police.x = lay.policeX; }
   else if (police.state === "out") { police.walk += 0.25; police.x += 7 * lay.s; if (police.x > W + 100) police.state = "off"; }
   quotaTick();
   if (ui.dialog) { const d = ui.dialog, line = d.lines[d.i][1]; if (d.ch < line.length) d.ch += 1.4; else if (++d.idle > 30 * 3.5) nextLine(); }
+  if (ui.pendingEnding > 0 && --ui.pendingEnding <= 0) startPolice("ending");
 
-  if (T % 30 === 0) checkAch();
+  if (T % 30 === 0) { checkAch(); if (S.police && S.quests.length < 3) fillQuests(); }
   if (T % 60 === 0) save();
 }
 function nextLine() {
@@ -1490,8 +1894,10 @@ function nextLine() {
 // 10. DRAWING THE UI
 // =====================================================================
 function rr(x, y, w, h, r) {
-  r = Math.min(r, w / 2, h / 2);
-  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  ctx.beginPath();
+  if (!(w > 0) || !(h > 0)) return;       // nothing to draw (and never a negative radius)
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 // text with a dark outline (every label in the game uses this)
 function label(text, x, y, size, color = "#f4ead8", align = "left", font = FONT_T, outline = true, base = "alphabetic") {
@@ -1502,6 +1908,8 @@ function label(text, x, y, size, color = "#f4ead8", align = "left", font = FONT_
   return ctx.measureText(text).width;
 }
 function textW(text, size, font = FONT_T) { ctx.font = `${font === FONT_B ? "800 " : ""}${size}px ${font}`; return ctx.measureText(text).width; }
+// shrink a font until the text fits in maxW
+function fitSize(text, size, maxW, font = FONT_T) { while (size > 9 && textW(text, size, font) > maxW) size -= 1; return size; }
 function panel(x, y, w, h, r = 16, o = {}) {
   ctx.save();
   rr(x, y + 6, w, h, r); ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fill();
@@ -1511,6 +1919,13 @@ function panel(x, y, w, h, r = 16, o = {}) {
   ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
   rr(x + 4, y + 4, w - 8, h - 8, r - 3); ctx.lineWidth = 2; ctx.strokeStyle = o.rim || "rgba(255,220,170,0.12)"; ctx.stroke();
   ctx.restore();
+}
+// a progress bar that always shows its true value, 0..100%
+function bar(x, y, w, h, f, color, back = "rgba(0,0,0,0.5)") {
+  f = clamp(isFinite(f) ? f : 0, 0, 1);
+  rr(x, y, w, h, h / 2); ctx.fillStyle = back; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = INK; ctx.stroke();
+  const iw = (w - 6) * f;
+  if (iw > 0.5) { rr(x + 3, y + 3, Math.max(iw, Math.min(h - 6, w - 6)), h - 6, (h - 6) / 2); ctx.fillStyle = color; ctx.fill(); }
 }
 const BTN_STYLE = {
   gold: ["#ffdf6a", "#f0a020", "#3a2200"], stone: ["#5e4e42", "#3a2f27", "#f4ead8"], red: ["#ff7a6a", "#c83a2a", "#fff"],
@@ -1530,14 +1945,14 @@ function button(id, x, y, w, h, text, o = {}) {
   ctx.save(); rr(xx, yy, w, h, o.r || 12); ctx.clip();
   ctx.fillStyle = `rgba(255,255,255,${0.16 + a * 0.12})`; ctx.fillRect(xx, yy, w, h * 0.42);
   ctx.restore();
-  let tx = xx + w / 2;
+  let tx = xx + w / 2, tw = w - 16;
   if (o.icon) {
     const isz = o.iconSize || h * 0.62;
-    if (text) { drawIcon(o.icon, xx + h * 0.55, yy + h / 2, isz, st[2]); tx = xx + h * 0.55 + (w - h * 0.55) / 2 + isz * 0.1; }
+    if (text) { drawIcon(o.icon, xx + h * 0.55, yy + h / 2, isz, st[2]); tx = xx + h * 0.55 + (w - h * 0.55) / 2 + isz * 0.1; tw = w - h * 1.1; }
     else drawIcon(o.icon, xx + w / 2, yy + h / 2, isz, st[2]);
   }
-  if (text) label(text, tx, yy + h / 2 + 1, o.size || h * 0.42, st[2], "center", FONT_T, o.style !== "gold" && o.style !== "green", "middle");
-  if (o.badge) { const bw = Math.max(22, textW(o.badge, 14) + 12); rr(xx + w - bw + 6, yy - 8, bw, 22, 11); ctx.fillStyle = "#ff5a4a"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = INK; ctx.stroke(); label(o.badge, xx + w - bw / 2 + 6, yy + 3, 14, "#fff", "center", FONT_T, false, "middle"); }
+  if (text) label(text, tx, yy + h / 2 + 1, fitSize(text, o.size || h * 0.42, tw), st[2], "center", FONT_T, o.style !== "gold" && o.style !== "green", "middle");
+  if (o.badge) { const bw = Math.max(22, textW(o.badge, 14) + 12); rr(xx + w - bw + 6, yy - 8, bw, 22, 11); ctx.fillStyle = o.badgeColor || "#ff5a4a"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = INK; ctx.stroke(); label(o.badge, xx + w - bw / 2 + 6, yy + 3, 14, "#fff", "center", FONT_T, false, "middle"); }
   ctx.restore();
   if (!o.disabled || o.always) reg(id, x, y, w, h, o.onClick);
 }
@@ -1546,168 +1961,260 @@ function drawHUD() {
   const h = lay.hud;
   const g = ctx.createLinearGradient(0, 0, 0, h + 20); g.addColorStop(0, "rgba(12,9,7,0.95)"); g.addColorStop(1, "rgba(12,9,7,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, h + 20);
+  // depth badge in the middle; the gold readout must stop before it
+  const bw = 280, bx = W / 2 - bw / 2;
+  const leftMax = bx - 64 - 72;
   // gold
   game.goldShown = game.goldShown + (S.gold - game.goldShown) * 0.25;
-  if (Math.abs(S.gold - game.goldShown) < 1) game.goldShown = S.gold;
+  if (!isFinite(game.goldShown) || Math.abs(S.gold - game.goldShown) < 1) game.goldShown = S.gold;
   const bump = anim("goldbump", 0, 0.15);
   drawCoin(40, 42, 22 + bump * 6);
-  label(fmt(game.goldShown), 72, 56, 40 + bump * 4, ev.rush > 0 ? "#ffe066" : "#ffd447");
+  const gtxt = fmt(game.goldShown);
+  label(gtxt, 72, 56, fitSize(gtxt, 40 + bump * 4, leftMax), ev.rush > 0 ? "#ffe066" : "#ffd447");
   const bits = [`x${fmt(goldMult(S) * rebirthMult(S))} gold`];
   if (drillPPS(S)) bits.push(`+${fmt(drillPPS(S))}/s`);
   bits.push(`Best ${fmt(S.high)}`);
+  while (bits.length > 1 && textW(bits.join("   ·   "), 15, FONT_B) > leftMax) bits.pop();   // never run into the depth badge
   label(bits.join("   ·   "), 74, 78, 15, "#cbbca8", "left", FONT_B, true);
-  // layer badge with up/down arrows
-  const bw = 300, bx = W / 2 - bw / 2;
   panel(bx, 10, bw, 62, 14);
   label(LAYERS[S.layer].name.toUpperCase(), W / 2, 44, 26, ["#d8cbb8", "#a8d4ff", "#ffa060", "#c89aff", "#ffd060"][S.layer], "center");
   label(`DEPTH ${S.layer + 1} / ${LAYERS.length}` + (S.rebirths ? `   ·   REBIRTH ${S.rebirths}` : ""), W / 2, 63, 13, "#9a8c7c", "center", FONT_B, false);
-  if (S.layer > 0) button("up", bx - 52, 16, 46, 50, "", { icon: "up", onClick: () => { SFX.click(); goLayer(S.layer - 1); } });
-  if (S.layer < S.maxLayer) button("down", bx + bw + 6, 16, 46, 50, "", { icon: "down", onClick: () => { SFX.click(); goLayer(S.layer + 1); } });
-  // right side buttons
-  const found = S.found.filter(n => n > 0).length;
+  if (S.layer > 0) button("up", bx - 52, 16, 46, 50, "", { icon: "up", disabled: !!ui.trans, onClick: () => { SFX.click(); goLayer(S.layer - 1); } });
+  if (S.layer < S.maxLayer) button("down", bx + bw + 6, 16, 46, 50, "", { icon: "down", disabled: !!ui.trans, onClick: () => { SFX.click(); goLayer(S.layer + 1); } });
+  // top right: menu + sound
   const bs = 54; let x = W - bs - 14;
   button("home", x, 14, bs, bs, "", { icon: "home", onClick: () => { SFX.click(); goTitle(); } }); x -= bs + 10;
-  button("snd", x, 14, bs, bs, "", { icon: settings.muted ? "mute" : "sound", onClick: () => { SFX.click(); openModal("sound"); } }); x -= bs + 10;
+  button("snd", x, 14, bs, bs, "", { icon: settings.muted ? "mute" : "sound", onClick: () => { SFX.click(); openModal("sound"); } });
+  // bottom right dock
+  const found = S.found.filter(n => n > 0).length;
   const achN = ACH.filter(a => S.ach[a.id]).length;
-  button("ach", x, 14, bs, bs, "", { icon: "trophy", badge: achN + "", onClick: () => { SFX.click(); openModal("ach"); } }); x -= bs + 10;
-  button("idx", x, 14, bs, bs, "", { icon: "book", badge: found + "", onClick: () => { SFX.click(); ui.idxLayer = Math.min(S.layer, 4); openModal("index"); } });
+  const dy = H - 76; x = W - bs - 14;
+  button("idx", x, dy, bs, bs, "", { icon: "book", badge: found + "", onClick: () => { SFX.click(); ui.idxLayer = Math.min(S.layer, 4); openModal("index"); } }); x -= bs + 10;
+  button("ach", x, dy, bs, bs, "", { icon: "trophy", badge: achN + "", onClick: () => { SFX.click(); ui.achPage = 0; openModal("ach"); } }); x -= bs + 10;
+  if (S.police) { const ready = S.quests.filter(q => questProg(q) >= q.n).length; button("orders", x, dy, bs, bs, "", { icon: "orders", badge: ready ? ready + "!" : "", badgeColor: "#2fae3a", onClick: () => { SFX.click(); fillQuests(); openModal("orders"); } }); x -= bs + 10; }
+  if (S.rebirths > 0 || S.stars > 0) button("perks", x, dy, bs, bs, "", { icon: "star", badge: S.stars ? S.stars + "" : "", badgeColor: "#c08a00", onClick: () => { SFX.click(); openModal("perks"); } });
   // shop button (bottom left, like his)
-  const anyBuy = ["mult", "speed", "drill", "pick", "luck", "dig"].some(k => { const c = cardInfo(k); return !c.sold && !c.locked && !c.rebirth && S.gold >= c.cost; });
+  const anyBuy = SHOP_TABS.some(t => t.keys.some(k => canAfford(cardInfo(k))));
   const pulse = anyBuy && !ui.shop ? 0.5 + 0.5 * Math.sin(T / 30 * 5) : 0;
   if (pulse) glow(110, H - 50, 120, "rgba(255,200,60,0.5)", pulse);
   button("shopbtn", 20, H - 80, 180, 62, ui.shop ? "CLOSE" : "SHOP", { icon: "shop", style: "gold", size: 30, onClick: () => { SFX.click(); ui.shop = !ui.shop; } });
-  // event timers
-  let ey = h + 6;
-  if (ev.rush > 0) { timerBar(W / 2, ey, "GOLD RUSH x3", ev.rush / (30 * 20), "#ffcc33"); ey += 34; }
-  if (ev.vein > 0) { timerBar(W / 2, ey, `CRYSTAL VEIN: ${ev.vein} lucky rocks`, ev.vein / 10, "#4dc3ff"); ey += 34; }
-  if (police.quota) timerBar(W / 2, ey, `INSPECTION: ${police.quota.got} / ${police.quota.need} rocks`, police.quota.t / (30 * 30), "#9ab0ff");
+  drawBars();
 }
-function timerBar(cx, y, text, f, color) {
-  const w = 320, x = cx - w / 2;
-  rr(x, y, w, 28, 14); ctx.fillStyle = "rgba(10,8,6,0.8)"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
-  rr(x + 4, y + 4, (w - 8) * clamp(f, 0, 1), 20, 10); ctx.fillStyle = color; ctx.globalAlpha = 0.35; ctx.fill(); ctx.globalAlpha = 1;
-  label(text, cx, y + 15, 16, color, "center", FONT_T, true, "middle");
+// event bars, bottom middle. Finished bars stay for a moment at their final value.
+function drawBars() {
+  const list = [];
+  if (ev.rush > 0) list.push({ text: "GOLD RUSH x3", f: ev.rush / ev.rushMax, color: "#ffcc33" });
+  if (ev.frenzy > 0) list.push({ text: "PICKAXE FRENZY x2", f: ev.frenzy / ev.frenzyMax, color: "#ff8a2a" });
+  if (ev.vein > 0) list.push({ text: `CRYSTAL VEIN: ${ev.vein} lucky rocks`, f: ev.vein / ev.veinMax, color: "#4dc3ff" });
+  if (police.quota) list.push({ text: `INSPECTION: ${police.quota.got} / ${police.quota.need}   ${Math.ceil(police.quota.t / 30)}s`, f: police.quota.got / police.quota.need, color: "#9ab0ff" });
+  if (rock.boss && !ui.trans) list.push({ text: `${BOSSES[S.layer].name}: ${fmt(curHP() - rock.dmg)} HP`, f: 1 - rock.dmg / curHP(), color: "#ff5a4a" });
+  for (const l of ui.linger) list.push(Object.assign({ a: Math.min(1, l.t / 10) }, l));
+  const w = lay.barsW; if (w < 120) return;
+  list.slice(0, 4).forEach((b, i) => {
+    const y = H - 44 - i * 34, x = lay.barsCX - w / 2;
+    ctx.save(); ctx.globalAlpha = b.a === undefined ? 1 : b.a;
+    bar(x, y, w, 28, b.f, b.color + "", "rgba(10,8,6,0.85)");
+    label(b.text, lay.barsCX, y + 15, fitSize(b.text, 16, w - 20), "#ffffff", "center", FONT_T, true, "middle");
+    ctx.restore();
+  });
 }
 
 function drawShop() {
   ui.shopA = clamp(ui.shopA + (ui.shop ? 0.09 : -0.12), 0, 1);
   if (ui.shopA <= 0) return;
   const w = lay.shopW, x = lerp(-w - 40, 14, easeBack(ui.shopA)), y = lay.hud + 8, h = H - y - 96;
+  const live = ui.shop && ui.shopA > 0.6;   // only clickable while open (not while sliding away)
   panel(x, y, w, h, 18);
   label("SHOP", x + 22, y + 44, 34, "#ffd447");
-  label(fmt(S.gold) + " Gold", x + w - 20, y + 42, 18, "#cbbca8", "right", FONT_B);
-  reg("shoppanel", x, y, w, h, null);
-  const keys = ["mult", "speed", "drill", "pick", "luck", "dig"];
-  const top = y + 62, ch = Math.min(96, (h - 74) / keys.length - 8);
+  const gt = fmt(S.gold) + " Gold";
+  label(gt, x + w - 20, y + 42, fitSize(gt, 18, w - 150, FONT_B), "#cbbca8", "right", FONT_B);
+  if (live) reg("shoppanel", x, y, w, h, null);
+  // tabs
+  const tw = (w - 24 - 12) / 3;
+  SHOP_TABS.forEach((t, i) => {
+    const n = t.keys.filter(k => canAfford(cardInfo(k))).length;
+    const tx = x + 12 + i * (tw + 6), ty = y + 58;
+    if (live) button("stab" + i, tx, ty, tw, 36, t.name, { style: ui.shopTab === i ? "gold" : "stone", size: 17, badge: n ? n + "" : "", badgeColor: "#2fae3a", onClick: () => { SFX.click(); ui.shopTab = i; } });
+    else { rr(tx, ty, tw, 36, 12); ctx.fillStyle = ui.shopTab === i ? "#f0a020" : "#3a2f27"; ctx.fill(); }
+  });
+  const keys = SHOP_TABS[ui.shopTab].keys;
+  const top = y + 106, ch = Math.min(92, (h - 118) / 5 - 8);
   keys.forEach((k, i) => {
     const info = cardInfo(k), cy = top + i * (ch + 8), cx = x + 12, cw = w - 24;
-    const id = "card_" + k;
-    const hov = hoverId === id;
+    const id = "card_" + k, hov = hoverId === id;
     const a = anim(id + ":h", hov ? 1 : 0, 0.3);
     const sh = anims["shake_" + k] || 0; if (sh) anims["shake_" + k] = sh < 0.02 ? 0 : sh * 0.86;
     const ox = Math.sin(sh * 30) * sh * 10 + a * 4;
-    const afford = !info.sold && !info.locked && S.gold >= info.cost;
+    const afford = canAfford(info);
     ctx.save(); ctx.translate(ox, 0);
     rr(cx, cy, cw, ch, 12);
     const g = ctx.createLinearGradient(0, cy, 0, cy + ch);
     g.addColorStop(0, info.rebirth ? "#2a5a30" : afford ? "#4e4032" : "#33291f"); g.addColorStop(1, info.rebirth ? "#163a1a" : afford ? "#2e251c" : "#231c16");
     ctx.fillStyle = g; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = afford || info.rebirth ? `rgba(255,${200 + 40 * Math.sin(T / 6)},80,0.9)` : INK; ctx.stroke();
-    // icon box
     rr(cx + 8, cy + 8, ch - 16, ch - 16, 10); ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fill();
+    ctx.globalAlpha = info.locked ? 0.4 : 1;
     drawIcon(info.icon, cx + ch / 2, cy + ch / 2, (ch - 16) * 0.75);
-    const tx = cx + ch + 2;
-    label(info.title, tx, cy + 28, 19, info.sold ? "#9a8c7c" : "#f4ead8");
-    ctx.save(); ctx.beginPath(); ctx.rect(tx, cy, cw - ch - 6, ch); ctx.clip();
-    label(info.sub, tx, cy + 48, 13, "#b0a290", "left", FONT_B, false);
-    ctx.restore();
-    // level pips
-    if (info.max) for (let p = 0; p < info.max; p++) { ctx.beginPath(); ctx.arc(tx + 5 + p * 12, cy + ch - 16, 4, 0, TAU); ctx.fillStyle = p < info.level ? "#ffd447" : "rgba(255,255,255,0.12)"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = INK; ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    if (info.locked && !info.rebirth && info.k !== "dig") drawIcon("lock", cx + ch - 16, cy + ch - 18, 18, "#cbbca8");
+    const tx = cx + ch + 2, textMax = cw - ch - 12;
+    label(info.title, tx, cy + 26, fitSize(info.title, 19, textMax), info.sold || info.locked ? "#9a8c7c" : "#f4ead8");
+    label(info.sub, tx, cy + 45, fitSize(info.sub, 13, textMax, FONT_B), "#b0a290", "left", FONT_B, false);
+    if (info.max) for (let p = 0; p < info.max; p++) { ctx.beginPath(); ctx.arc(tx + 5 + p * 11, cy + ch - 14, 3.5, 0, TAU); ctx.fillStyle = p < info.level ? "#ffd447" : "rgba(255,255,255,0.12)"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = INK; ctx.stroke(); }
     if (!info.sold && !info.locked && !info.rebirth) {
-      const cw2 = textW(fmt(info.cost), 18);
-      drawCoin(cx + cw - cw2 - 26, cy + ch - 18, 9);
-      label(fmt(info.cost), cx + cw - 12, cy + ch - 11, 18, afford ? "#ffd447" : "#c86a5a", "right");
+      const ct = fmt(info.cost), cwid = textW(ct, 18);
+      // savings bar: fills up to 100% exactly when you can afford it
+      const bw2 = Math.max(40, cw - ch - 30 - cwid - 30);
+      bar(tx, cy + 52, bw2, 10, S.gold / info.cost, afford ? "#7dff6a" : "#c8963a");
+      drawCoin(cx + cw - cwid - 26, cy + ch - 18, 9);
+      label(ct, cx + cw - 12, cy + ch - 11, 18, afford ? "#ffd447" : "#c86a5a", "right");
     }
     if (info.sold) { ctx.save(); ctx.translate(cx + cw - 70, cy + ch / 2 + 6); ctx.rotate(-0.12); label("SOLD OUT", 0, 0, 22, "#ff3a2a", "center"); ctx.restore(); }   // like his red SOLD OUT
     ctx.restore();
-    reg(id, cx, cy, cw, ch, () => tryBuy(k, { x: cx, y: cy, w: cw, h: ch }));
+    if (live) reg(id, cx, cy, cw, ch, () => tryBuy(k, { x: cx, y: cy, w: cw, h: ch }));
   });
 }
 
 // ---------- modals ----------
-function openModal(m) { ui.modal = m; anims.modalA = 0; }
-function closeModal() { ui.modal = null; ui.confirm = null; }
+function openModal(m) { if (ui.modal === "ending" && m !== "ending") return; ui.modal = m; anims.modalA = 0; }
+function closeModal() { ui.modal = null; ui.confirm = null; ui.drag = null; }
 function modalFrame(w, h, title) {
+  w = Math.min(w, W - 30); h = Math.min(h, H - 30);
   const a = anim("modalA", 1, 0.2);
   ctx.fillStyle = `rgba(0,0,0,${0.6 * a})`; ctx.fillRect(0, 0, W, H);
   reg("modalbg", 0, 0, W, H, ui.modal === "ending" ? null : closeModal);
-  const x = W / 2 - w / 2, y = H / 2 - h / 2 + (1 - easeBack(a)) * 40;
-  ctx.save(); ctx.globalAlpha = a;
+  // the panel is placed where it ends up, so clicks always match what you see
+  const x = W / 2 - w / 2, y = H / 2 - h / 2;
+  ctx.save(); ctx.translate(0, (1 - easeBack(a)) * 30);
   panel(x, y, w, h, 20);
-  reg("modal", x, y, w, h, null);
-  if (title) label(title, x + 28, y + 50, 34, "#ffd447");
-  if (ui.modal !== "ending") button("mclose", x + w - 62, y + 14, 46, 46, "", { icon: "close", onClick: () => { SFX.click(); closeModal(); } });
   ctx.restore();
+  reg("modal", x, y, w, h, null);
+  if (title) label(title, x + 28, y + 50, fitSize(title, 34, w - 280), "#ffd447");
+  if (ui.modal !== "ending") button("mclose", x + w - 62, y + 14, 46, 46, "", { icon: "close", onClick: () => { SFX.click(); closeModal(); } });
   return { x, y, w, h };
 }
 function drawIndex() {
-  const f = modalFrame(Math.min(W - 60, 1040), Math.min(H - 70, 640), "MINERAL INDEX");
+  const f = modalFrame(1040, 640, "MINERAL INDEX");
   const total = S.found.filter(n => n > 0).length;
   label(`${total} / ${MINERALS.length} found`, f.x + 290, f.y + 48, 18, "#cbbca8", "left", FONT_B);
-  // tabs
-  const tabs = LAYERS.map(l => l.name);
   let tx = f.x + 24;
-  tabs.forEach((n, L) => {
+  const tabW = (f.w - 48 - 4 * 8) / 5;
+  LAYERS.forEach((l, L) => {
     const known = L <= S.maxLayer || LAYER_MINERALS[L].some(m => S.found[m.id] > 0);
-    const tw = textW(known ? n : "???", 17) + 34;
-    button("tab" + L, tx, f.y + 70, tw, 40, known ? n : "???", { style: ui.idxLayer === L ? "gold" : "stone", size: 17, disabled: !known, onClick: () => { SFX.click(); ui.idxLayer = L; ui.idxPick = LAYER_MINERALS[L][0].id; } });
-    tx += tw + 8;
+    button("tab" + L, tx, f.y + 70, tabW, 40, known ? l.name : "???", { style: ui.idxLayer === L ? "gold" : "stone", size: 17, disabled: !known, onClick: () => { SFX.click(); ui.idxLayer = L; ui.idxPick = LAYER_MINERALS[L][0].id; } });
+    tx += tabW + 8;
   });
   const list = LAYER_MINERALS[ui.idxLayer];
   if (!list.some(m => m.id === ui.idxPick)) ui.idxPick = list[0].id;
-  const gx = f.x + 24, gy = f.y + 126, gw = f.w - 360, cw = 100, chh = 108;
-  const cols = Math.max(1, Math.floor(gw / (cw + 10)));
+  const paneW = Math.min(300, f.w * 0.34);
+  const gx = f.x + 24, gy = f.y + 126, gw = f.w - paneW - 72;
+  const cols = Math.max(1, Math.floor((gw + 10) / 110)), rows = Math.ceil(list.length / cols);
+  const chh = Math.min(108, (f.h - 150) / rows - 10), cw = Math.min(100, gw / cols - 10);
   list.forEach((m, i) => {
     const x = gx + (i % cols) * (cw + 10), y = gy + Math.floor(i / cols) * (chh + 10);
     const found = S.found[m.id] > 0, sel = ui.idxPick === m.id, id = "min" + m.id, hov = hoverId === id;
     rr(x, y, cw, chh, 12); ctx.fillStyle = sel ? "#4e4032" : hov ? "#3e332a" : "#2a221c"; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = sel ? "#ffd447" : INK; ctx.stroke();
-    if (found) glow(x + cw / 2, y + 48, 44, rarityGlowColor(m.rarity, T / 30), 0.35);
-    drawMineral(m, x + cw / 2, y + 50, 30 + (hov ? 3 : 0), { sil: !found, t: T / 30 });
-    if (!found) label("?", x + cw / 2, y + 60, 28, "#6a5e52", "center");
+    const ms = Math.min(30, chh * 0.3);
+    if (found) glow(x + cw / 2, y + chh * 0.46, ms * 1.5, rarityGlowColor(m.rarity, T / 30), 0.35);
+    drawMineral(m, x + cw / 2, y + chh * 0.46, ms + (hov ? 3 : 0), { sil: !found, t: T / 30 });
+    if (!found) label("?", x + cw / 2, y + chh * 0.56, ms, "#6a5e52", "center");
     rr(x + 8, y + chh - 12, cw - 16, 5, 2); ctx.fillStyle = found ? rarityColor(m.rarity, T / 30) : "#3a322a"; ctx.fill();
     if (found) label("x" + fmt(S.found[m.id]), x + cw - 8, y + 20, 13, "#cbbca8", "right", FONT_B);
     reg(id, x, y, cw, chh, () => { SFX.click(); ui.idxPick = m.id; });
   });
-  // detail pane
   const m = MINERALS[ui.idxPick], found = S.found[m.id] > 0;
-  const px = f.x + f.w - 324, py = f.y + 126, pw = 300, ph = f.h - 150;
+  const px = f.x + f.w - paneW - 24, py = f.y + 126, pw = paneW, ph = f.h - 150;
   rr(px, py, pw, ph, 14); ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
-  const t = T / 30;
-  if (found) { glow(px + pw / 2, py + 120, 150, rarityGlowColor(m.rarity, t), 0.55 + 0.1 * Math.sin(t * 2)); for (let i = 0; i < 5; i++) star(px + pw / 2 + Math.cos(t + i * 1.3) * 90, py + 120 + Math.sin(t * 1.3 + i * 2) * 60, 6 * (0.5 + 0.5 * Math.sin(t * 4 + i)), "#fff"); }
-  drawMineral(m, px + pw / 2, py + 122 + Math.sin(t * 2) * 4, 82, { sil: !found, t });
-  const ly = py + 250;
-  label(found ? m.name : "???", px + pw / 2, ly, 26, "#ffffff", "center");
-  label(m.rarity, px + pw / 2, ly + 28, 20, rarityColor(m.rarity, t), "center");
-  const mult = goldMult(S) * rebirthMult(S);
-  label(`+${fmt(m.gold)} Gold`, px + pw / 2, ly + 60, 20, "#ffd447", "center");
-  label(`with your x${fmt(mult)}: +${fmt(m.gold * mult)}`, px + pw / 2, ly + 82, 14, "#cbbca8", "center", FONT_B, false);
+  const t = T / 30, ms = Math.min(82, ph * 0.18);
+  if (found) { glow(px + pw / 2, py + ph * 0.25, ms * 1.8, rarityGlowColor(m.rarity, t), 0.55 + 0.1 * Math.sin(t * 2)); for (let i = 0; i < 5; i++) star(px + pw / 2 + Math.cos(t + i * 1.3) * pw * 0.3, py + ph * 0.25 + Math.sin(t * 1.3 + i * 2) * ms * 0.7, 6 * (0.5 + 0.5 * Math.sin(t * 4 + i)), "#fff"); }
+  drawMineral(m, px + pw / 2, py + ph * 0.25 + Math.sin(t * 2) * 4, ms, { sil: !found, t });
+  const ly = py + ph * 0.55, cxp = px + pw / 2;
+  const nm = found ? m.name : "???";
+  label(nm, cxp, ly, fitSize(nm, 26, pw - 20), "#ffffff", "center");
+  label(m.rarity, cxp, ly + 28, 20, rarityColor(m.rarity, t), "center");
+  const mult = goldMult(S) * rebirthMult(S) * gearMult(S, m.layer);
+  label(`+${fmt(m.gold)} Gold`, cxp, ly + 58, 20, "#ffd447", "center");
+  const wm = `with your x${fmt(mult)}: +${fmt(m.gold * mult)}`;
+  label(wm, cxp, ly + 80, fitSize(wm, 14, pw - 20, FONT_B), "#cbbca8", "center", FONT_B, false);
   const chance = m.d < 0 ? "Only from breaking the Core" : `Chance: 1 in ${fmt(Math.round(1 / CHANCE[m.id]))}`;
-  label(chance, px + pw / 2, ly + 112, 16, "#cbbca8", "center", FONT_B, false);
-  label(`Found: ${fmt(S.found[m.id])}`, px + pw / 2, ly + 136, 16, "#cbbca8", "center", FONT_B, false);
+  label(chance, cxp, ly + 106, fitSize(chance, 16, pw - 20, FONT_B), "#cbbca8", "center", FONT_B, false);
+  label(`Found: ${fmt(S.found[m.id])}`, cxp, ly + 128, 16, "#cbbca8", "center", FONT_B, false);
 }
 function drawAch() {
-  const f = modalFrame(Math.min(W - 60, 1040), Math.min(H - 70, 640), "TROPHIES");
+  const f = modalFrame(1040, 640, "TROPHIES");
   const n = ACH.filter(a => S.ach[a.id]).length;
   label(`${n} / ${ACH.length}`, f.x + 230, f.y + 48, 18, "#cbbca8", "left", FONT_B);
-  const cols = f.w > 900 ? 3 : 2, cw = (f.w - 48 - (cols - 1) * 10) / cols, chh = Math.min(64, (f.h - 100) / Math.ceil(ACH.length / cols) - 6);
-  ACH.forEach((a, i) => {
+  const cols = f.w > 900 ? 3 : 2, chh = 58, rowsFit = Math.max(1, Math.floor((f.h - 150) / (chh + 6)));
+  const per = cols * rowsFit, pages = Math.ceil(ACH.length / per);
+  ui.achPage = clamp(ui.achPage, 0, pages - 1);
+  const cw = (f.w - 48 - (cols - 1) * 10) / cols;
+  ACH.slice(ui.achPage * per, ui.achPage * per + per).forEach((a, i) => {
     const x = f.x + 24 + (i % cols) * (cw + 10), y = f.y + 80 + Math.floor(i / cols) * (chh + 6);
     const got = !!S.ach[a.id];
     rr(x, y, cw, chh, 10); ctx.fillStyle = got ? "#4a3c22" : "#241d18"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = got ? "#ffd447" : INK; ctx.stroke();
     drawIcon("trophy", x + chh / 2 + 2, y + chh / 2, chh * 0.62, got ? "#ffc21a" : "#4a4038");
-    label(a.name, x + chh + 6, y + chh * 0.45, 18, got ? "#ffe080" : "#8a7e70");
-    label(a.desc, x + chh + 6, y + chh * 0.8, 13, got ? "#d8cbb8" : "#6a5e52", "left", FONT_B, false);
+    label(a.name, x + chh + 6, y + chh * 0.45, fitSize(a.name, 18, cw - chh - 14), got ? "#ffe080" : "#8a7e70");
+    label(a.desc, x + chh + 6, y + chh * 0.8, fitSize(a.desc, 13, cw - chh - 14, FONT_B), got ? "#d8cbb8" : "#6a5e52", "left", FONT_B, false);
+  });
+  if (pages > 1) {
+    const by = f.y + f.h - 60;
+    button("achprev", f.x + f.w / 2 - 170, by, 120, 44, "Back", { disabled: ui.achPage === 0, onClick: () => { SFX.click(); ui.achPage--; } });
+    label(`${ui.achPage + 1} / ${pages}`, f.x + f.w / 2, by + 30, 20, "#cbbca8", "center");
+    button("achnext", f.x + f.w / 2 + 50, by, 120, 44, "Next", { disabled: ui.achPage >= pages - 1, onClick: () => { SFX.click(); ui.achPage++; } });
+  }
+}
+function drawOrders() {
+  const f = modalFrame(900, 600, "ROCK POLICE");
+  ["Orders", "Pickaxe skins"].forEach((t, i) => button("otab" + i, f.x + 290 + i * 170, f.y + 18, 160, 40, t, { style: ui.ordersTab === i ? "gold" : "stone", size: 17, onClick: () => { SFX.click(); ui.ordersTab = i; } }));
+  drawIcon("badge", f.x + 40, f.y + 92, 30);
+  label(`${S.badges} police badge${S.badges === 1 ? "" : "s"}`, f.x + 64, f.y + 100, 20, "#ffd447");
+  if (ui.ordersTab === 0) {
+    fillQuests();
+    label("Do what the Rock police says and earn badges. Spend them on pickaxe skins.", f.x + f.w / 2, f.y + 140, fitSize("Do what the Rock police says and earn badges. Spend them on pickaxe skins.", 16, f.w - 60, FONT_B), "#cbbca8", "center", FONT_B, false);
+    S.quests.forEach((q, i) => {
+      const y = f.y + 166 + i * 128, x = f.x + 30, w = f.w - 60, h = 112;
+      const p = questProg(q), done = p >= q.n;
+      rr(x, y, w, h, 14); ctx.fillStyle = done ? "#2a4a26" : "#2a221c"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = done ? "#7dff6a" : INK; ctx.stroke();
+      drawIcon("orders", x + 52, y + h / 2, 64);
+      const txt = QUEST_KINDS[q.type].text(q);
+      label(txt, x + 100, y + 40, fitSize(txt, 24, w - 330), "#ffffff");
+      bar(x + 100, y + 56, w - 330, 22, p / q.n, done ? "#7dff6a" : "#9ab0ff");
+      label(`${fmt(p)} / ${fmt(q.n)}`, x + 100 + (w - 330) / 2, y + 68, 14, "#fff", "center", FONT_T, true, "middle");
+      const b = QUEST_KINDS[q.type].badges;
+      label(`Reward: ${b} badge${b > 1 ? "s" : ""} + Gold`, x + 100, y + 100, 14, "#cbbca8", "left", FONT_B, false);
+      button("claim" + i, x + w - 200, y + 30, 180, 54, done ? "CLAIM" : "Working...", { style: done ? "green" : "stone", disabled: !done, size: 22, onClick: () => claimQuest(i) });
+    });
+  } else {
+    const cols = 3, cw = (f.w - 60 - (cols - 1) * 12) / cols, chh = 128;
+    SKINS.forEach((k, i) => {
+      const x = f.x + 30 + (i % cols) * (cw + 12), y = f.y + 130 + Math.floor(i / cols) * (chh + 10);
+      const own = !!S.skins[k.id], eq = S.skin === k.id;
+      rr(x, y, cw, chh, 14); ctx.fillStyle = eq ? "#4e4032" : "#2a221c"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = eq ? "#ffd447" : INK; ctx.stroke();
+      ctx.save(); if (!own) ctx.globalAlpha = 0.45; drawPickaxe(x + 56, y + chh / 2 + 6, 0.62, k, T / 30); ctx.restore();
+      label(k.name, x + 110, y + 34, fitSize(k.name, 20, cw - 120), own ? "#ffffff" : "#9a8c7c");
+      let btxt, style = "stone", dis = false, fn;
+      if (eq) { btxt = "Equipped"; dis = true; }
+      else if (own) { btxt = "Equip"; style = "gold"; fn = () => { S.skin = k.id; SFX.click(); save(); }; }
+      else if (k.cost < 0) { btxt = "Beat " + BOSSES[k.boss].name; dis = true; }
+      else { btxt = `${k.cost} badges`; style = S.badges >= k.cost ? "green" : "stone"; dis = S.badges < k.cost; fn = () => { if (S.badges < k.cost) return; S.badges -= k.cost; S.skins[k.id] = true; S.skin = k.id; SFX.buy(); save(); }; }
+      button("skin" + i, x + 108, y + 58, cw - 122, 48, btxt, { style, disabled: dis, size: 18, onClick: fn });
+    });
+  }
+}
+function drawPerks() {
+  const f = modalFrame(820, 560, "REBIRTH PERKS");
+  drawIcon("star", f.x + 40, f.y + 92, 32);
+  label(`${S.stars} Rebirth star${S.stars === 1 ? "" : "s"}  ·  you get ${STARS_PER_REBIRTH} every rebirth`, f.x + 66, f.y + 100, 20, "#ffd447");
+  PERKS.forEach((p, i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const w = (f.w - 72) / 2, h = 118, x = f.x + 24 + col * (w + 24), y = f.y + 124 + row * (h + 12);
+    const l = perk(S, p.id), maxed = l >= p.max;
+    rr(x, y, w, h, 14); ctx.fillStyle = l ? "#3e3424" : "#2a221c"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+    label(p.name, x + 18, y + 34, 22, "#ffffff");
+    label(p.desc, x + 18, y + 58, fitSize(p.desc, 14, w - 36, FONT_B), "#cbbca8", "left", FONT_B, false);
+    for (let j = 0; j < p.max; j++) star(x + 26 + j * 24, y + 88, 10, j < l ? "#ffd447" : "rgba(255,255,255,0.15)");
+    button("perk" + i, x + w - 160, y + 66, 144, 42, maxed ? "MAX" : `${p.cost} star${p.cost > 1 ? "s" : ""}`, { style: !maxed && S.stars >= p.cost ? "gold" : "stone", disabled: maxed || S.stars < p.cost, size: 18, onClick: () => { if (buyPerk(S, p.id)) { SFX.levelUp(); award("perk"); save(); } } });
   });
 }
 function slider(name, x, y, w, text) {
@@ -1720,30 +2227,31 @@ function slider(name, x, y, w, text) {
   ui.sliders[name] = { x, w };
   reg("sl_" + name, x - 14, y - 14, w + 28, 44, () => { ui.drag = name; dragSlider(); });
 }
+let lastSliderClick = 0;
 function dragSlider() {
-  const s = ui.sliders[ui.drag]; if (!s) return;
+  const s = ui.sliders[ui.drag]; if (!s || ui.modal !== "sound") { ui.drag = null; return; }
   settings[ui.drag] = clamp((mouse.x - s.x) / s.w, 0, 1);
   applyVolumes();
-  if (ui.drag === "sfx" && T % 4 === 0) SFX.click();
+  if (ui.drag === "sfx" && T - lastSliderClick > 4) { lastSliderClick = T; SFX.click(); }
 }
 function drawSound() {
   const f = modalFrame(520, 470, "SOUND");
   slider("music", f.x + 40, f.y + 120, f.w - 80, "Music");
   slider("sfx", f.x + 40, f.y + 200, f.w - 80, "Effects");
-  button("mute", f.x + 40, f.y + 240, 200, 52, settings.muted ? "Unmute" : "Mute all", { icon: settings.muted ? "sound" : "mute", onClick: () => { toggleMute(); } });
-  button("shk", f.x + f.w - 240, f.y + 240, 200, 52, settings.shake ? "Shake: ON" : "Shake: OFF", { onClick: () => { settings.shake = !settings.shake; saveSettings(); SFX.click(); } });
+  button("mute", f.x + 40, f.y + 240, (f.w - 100) / 2, 52, settings.muted ? "Unmute" : "Mute all", { icon: settings.muted ? "sound" : "mute", onClick: () => { toggleMute(); } });
+  button("shk", f.x + f.w / 2 + 10, f.y + 240, (f.w - 100) / 2, 52, settings.shake ? "Shake: ON" : "Shake: OFF", { onClick: () => { settings.shake = !settings.shake; saveSettings(); SFX.click(); } });
   const lines = ["Rock breaking sound: LordSonny (Pixabay)", "Pickaxe sound: CreatorsHome", "Game, minerals and ideas: Sixten (made in Scratch first)", "Keys: hold Space to mine · S shop · I index · M mute · Esc menu"];
-  lines.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 340 + i * 26, 15, i === 3 ? "#9a8c7c" : "#cbbca8", "center", FONT_B, false));
+  lines.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 340 + i * 26, fitSize(l, 15, f.w - 30, FONT_B), i === 3 ? "#9a8c7c" : "#cbbca8", "center", FONT_B, false));
 }
 function drawConfirm() {
   const c = ui.confirm; if (!c) { ui.modal = null; return; }
-  const f = modalFrame(520, 300, c.title);
-  c.text.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 110 + i * 30, 18, i === c.text.length - 1 ? "#7dff6a" : "#d8cbb8", "center", FONT_B, false));
-  button("yes", f.x + 40, f.y + f.h - 86, 200, 60, "Yes!", { style: "green", onClick: () => { const y = c.yes; closeModal(); y(); } });
-  button("no", f.x + f.w - 240, f.y + f.h - 86, 200, 60, "No", { onClick: () => { SFX.click(); closeModal(); } });
+  const f = modalFrame(560, 300, c.title);
+  c.text.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 110 + i * 30, fitSize(l, 18, f.w - 40, FONT_B), i === c.text.length - 1 ? "#7dff6a" : "#d8cbb8", "center", FONT_B, false));
+  button("yes", f.x + 40, f.y + f.h - 86, (f.w - 100) / 2, 60, "Yes!", { style: "green", onClick: () => { const y = c.yes; closeModal(); y(); } });
+  button("no", f.x + f.w / 2 + 10, f.y + f.h - 86, (f.w - 100) / 2, 60, "No", { onClick: () => { SFX.click(); closeModal(); } });
 }
 function drawEnding() {
-  const f = modalFrame(Math.min(W - 60, 640), 500, null);
+  const f = modalFrame(640, 500, null);
   const t = T / 30;
   drawMineral(MINERALS[CORE_MINERAL], f.x + f.w / 2, f.y + 90 + Math.sin(t * 2) * 4, 46, { t });
   glow(f.x + f.w / 2, f.y + 90, 120, "rgba(255,200,60,0.6)", 0.6);
@@ -1751,13 +2259,14 @@ function drawEnding() {
   label("You broke the Core and became the Rock police.", f.x + f.w / 2, f.y + 226, 18, "#d8cbb8", "center", FONT_B, false);
   const stats = [`Time: ${fmtTime(S.time)}`, `Rocks broken: ${fmt(S.rocks)}`, `Minerals found: ${S.found.filter(n => n > 0).length} / ${MINERALS.length}`, `Gold earned: ${fmt(S.totalGold)}`];
   stats.forEach((s, i) => label(s, f.x + f.w / 2, f.y + 270 + i * 28, 18, "#cbbca8", "center", FONT_B, false));
-  button("keep", f.x + 40, f.y + f.h - 90, (f.w - 100) / 2, 62, "Keep mining", { onClick: () => { SFX.click(); closeModal(); goLayer(3); } });
-  button("reb", f.x + f.w / 2 + 10, f.y + f.h - 90, (f.w - 100) / 2, 62, `Rebirth x${rebirthMult(S) * 2}`, { style: "green", icon: "rebirth", onClick: () => { closeModal(); doRebirth(); } });
+  button("keep", f.x + 40, f.y + f.h - 90, (f.w - 100) / 2, 62, "Keep mining", { onClick: () => { SFX.click(); ui.modal = null; goLayer(3); } });
+  button("reb", f.x + f.w / 2 + 10, f.y + f.h - 90, (f.w - 100) / 2, 62, `Rebirth`, { style: "green", icon: "rebirth", onClick: () => { ui.modal = null; doRebirth(); } });
 }
 function drawDialog() {
   const d = ui.dialog; if (!d) return;
   const [who, text] = d.lines[d.i];
-  const w = Math.min(760, W - 40), h = 104, x = W / 2 - w / 2 + lay.sceneL / 2, y = lay.hud + 50;
+  const left = lay.sceneL + 20, avail = W - left - 20;
+  const w = Math.min(760, avail), h = 104, x = left + (avail - w) / 2, y = lay.hud + 96;
   const a = anim("dlgA", 1, 0.25);
   ctx.save(); ctx.globalAlpha = a;
   panel(x, y, w, h, 18, { top: "#2a2430", bot: "#16121a" });
@@ -1765,7 +2274,7 @@ function drawDialog() {
   ctx.save(); ctx.beginPath(); ctx.arc(x + 56, y + h / 2, 36, 0, TAU); ctx.clip(); drawHead(who === "you" ? "miner" : "police", x + 56, y + h / 2 + 10, 24, who === "you" ? 1 : -1, T / 30); ctx.restore();
   label(who === "you" ? "You" : "Rock police", x + 110, y + 34, 20, who === "you" ? "#ffb84a" : "#9ab0ff");
   ctx.save(); ctx.beginPath(); ctx.rect(x + 108, y, w - 120, h); ctx.clip();
-  label(text.slice(0, Math.floor(d.ch)), x + 110, y + 70, 22, "#ffffff", "left", FONT_B, false);
+  label(text.slice(0, Math.floor(d.ch)), x + 110, y + 70, fitSize(text, 22, w - 130, FONT_B), "#ffffff", "left", FONT_B, false);
   ctx.restore();
   if (d.ch >= text.length) label("click ▸", x + w - 18, y + h - 14, 14, `rgba(255,255,255,${0.4 + 0.3 * Math.sin(T / 5)})`, "right", FONT_B, false);
   ctx.restore();
@@ -1776,18 +2285,18 @@ function drawToasts() {
   const k = tt.t < 15 ? easeBack(tt.t / 15) : tt.t > 105 ? 1 - easeOut((tt.t - 105) / 15) : 1;
   const w = 330, h = 72, x = W - (w + 16) * k, y = lay.hud + 6;
   panel(x, y, w, h, 14, { top: "#4a3c22", bot: "#2a2114", rim: "rgba(255,210,80,0.4)" });
-  drawIcon("trophy", x + 38, y + h / 2, 42, "#ffc21a");
-  label("TROPHY UNLOCKED", x + 70, y + 28, 14, "#ffd447", "left", FONT_B, false);
-  label(tt.a.name, x + 70, y + 54, 22, "#ffffff");
+  if (tt.icon === "pick") drawPickaxe(x + 38, y + h / 2 + 4, 0.35, SKINS.find(s => s.name === tt.name) || SKINS[0], T / 30);
+  else drawIcon("trophy", x + 38, y + h / 2, 42, "#ffc21a");
+  label(tt.title, x + 70, y + 28, 14, "#ffd447", "left", FONT_B, false);
+  label(tt.name, x + 70, y + 54, fitSize(tt.name, 22, w - 86), "#ffffff");
 }
 function drawBanner() {
   const b = ui.banner; if (!b) return;
   const k = b.t < 10 ? easeBack(b.t / 10) : b.t > b.max - 15 ? 1 - easeOut((b.t - (b.max - 15)) / 15) : 1;
-  const y = lay.hud + 70 + (ev.rush > 0 || ev.vein > 0 || police.quota ? 40 : 0);
-  const cx = lay.cx;
-  ctx.save(); ctx.globalAlpha = clamp(k, 0, 1); ctx.translate(cx, y); ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
-  label(b.title, 0, 0, 52, b.color, "center");
-  if (b.sub) label(b.sub, 0, 32, 20, "#ffffff", "center", FONT_B);
+  const y = ui.dialog ? lay.hud + 250 : lay.hud + 70;
+  ctx.save(); ctx.globalAlpha = clamp(k, 0, 1); ctx.translate(lay.cx, y); ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
+  label(b.title, 0, 0, fitSize(b.title, 52, W - lay.sceneL - 40), b.color, "center");
+  if (b.sub) label(b.sub, 0, 32, fitSize(b.sub, 20, W - lay.sceneL - 40, FONT_B), "#ffffff", "center", FONT_B);
   ctx.restore();
 }
 
@@ -1801,15 +2310,17 @@ function drawWorld(t) {
   if (game.shake) ctx.translate((Math.random() - 0.5) * game.shake * 2, (Math.random() - 0.5) * game.shake * 2);
   drawCave(S.layer, t, game.px, game.py, lay, ev.vein > 0 ? 1 : 0);
   const s = lay.s, L = LAYERS[S.layer];
-  // drill
+  const skin = SKINS.find(k => k.id === S.skin) || SKINS[0];
   if (!L.core) drawDrill(lay.drillX, lay.ground, s, S.drill, t, lay.rockX + lay.R * 0.9);
-  // rock / core
   if (L.core) {
-    if (!S.coreBroken) {
-      drawCore(lay.rockX, lay.rockY, lay.R, S.coreHP / CORE_HP, t, rock.flash);
+    if (!S.coreBroken || game.coreBreakT > 0) {
+      // while it breaks, the Core stays on screen with its bar at 0 for a moment
+      const k = S.coreBroken ? 1 - game.coreBreakT / 40 : 0;
+      ctx.save(); ctx.globalAlpha = 1 - k;
+      drawCore(lay.rockX, lay.rockY, lay.R * (1 + k * 0.4), S.coreHP / CORE_HP, t, rock.flash);
+      ctx.restore();
       const bw = lay.R * 2.2, bx = lay.rockX - bw / 2, by = lay.rockY + lay.R + 30;
-      rr(bx, by, bw, 22, 11); ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
-      rr(bx + 4, by + 4, (bw - 8) * (S.coreHP / CORE_HP), 14, 7); ctx.fillStyle = "#ff8a2a"; ctx.fill();
+      bar(bx, by, bw, 22, S.coreHP / CORE_HP, "#ff8a2a", "rgba(0,0,0,0.6)");
       label(`CORE  ${fmt(S.coreHP)} HP`, lay.rockX, by + 12, 15, "#fff", "center", FONT_T, true, "middle");
     } else {
       glow(lay.rockX, lay.rockY, lay.R * 2, "rgba(255,120,30,0.4)", 0.6);
@@ -1818,20 +2329,34 @@ function drawWorld(t) {
       label("Rebirth in the shop to rebuild the mine", lay.rockX, lay.rockY + 10, 16, "#d8cbb8", "center", FONT_B);
     }
   } else if (rock.pause === 0) {
-    const sq = rock.squash, pop = easeBack(rock.pop);
-    drawRock(lay.rockX, lay.rockY, lay.R * rock.size * pop, ROCK_PAL[S.layer], rock.shape, rock.dmg / rockHP(S), { rot: rock.rot, flash: rock.flash, bright: rock.bright, sx: 1 + sq * 0.06, sy: 1 - sq * 0.06 });
+    const sq = rock.squash, pop = easeBack(rock.pop), R = lay.R * rock.size * pop;
+    if (rock.boss) glow(lay.rockX, lay.rockY, R * 2.2, "rgba(255,60,40,0.35)", 0.6 + 0.2 * Math.sin(t * 4));
+    drawRock(lay.rockX, lay.rockY, R, ROCK_PAL[S.layer], rock.shape, rock.dmg / curHP(), { rot: rock.rot, flash: rock.flash, bright: rock.bright, sx: 1 + sq * 0.06, sy: 1 - sq * 0.06 });
+    if (rock.boss && R > 1) drawBossFace(S.layer, lay.rockX, lay.rockY, R, t, rock.hurt);
+  } else {
+    // the break: the rock shows fully cracked (100%) and bursts apart
+    const k = 1 - rock.pause / rock.pauseMax, R = lay.R * rock.size * (1 + k * 0.25);
+    ctx.save(); ctx.globalAlpha = 1 - k;
+    drawRock(lay.rockX, lay.rockY, R, ROCK_PAL[S.layer], rock.shape, 1, { rot: rock.rot, flash: 0.4 * (1 - k), bright: rock.bright });
+    ctx.restore();
   }
-  // the miner + the police
-  drawMiner(lay.minerX, lay.ground, s, game.swing, t, game.smear);
+  drawMiner(lay.minerX, lay.ground, s, game.swing, t, game.smear, skin);
+  if (!L.core || !S.coreBroken) for (let i = 0; i < S.helper; i++) drawMiner(lay.miniX(i), lay.ground, s * 0.5, game.minis[i], t + i, game.minis[i] < 0.3 ? 1 - game.minis[i] * 3 : 0, SKINS[0], -1, false);
   if (police.state !== "off") drawPolice(police.x, lay.ground, s, police.walk, t, -1, police.state === "stand" && !!ui.dialog);
-  // boulders
-  for (const b of boulders) { drawRock(b.x, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, 0, { rot: b.rot }); if (b.landed && hoverId === null && Math.hypot(mouse.x - b.x, mouse.y - b.y) < b.r * 1.25) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.2, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,220,120,0.8)"; ctx.stroke(); } }
+  for (const b of falling) {
+    const hov = b.landed !== undefined && Math.hypot(mouse.x - b.x, mouse.y - b.y) < b.r * 1.3 && !regionAt(mouse.x, mouse.y);
+    if (b.kind === "meteor") drawMeteor(b.x, b.y, b.r, b.vx, b.vy, t, !!b.landed);
+    else drawRock(b.x, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, 0, { rot: b.rot });
+    if (hov) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.25, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,220,120,0.85)"; ctx.stroke(); }
+  }
   // minerals floating up (his clones: up 5 per frame, fading)
   for (const f of floaters) {
+    if (f.life < 0) continue;
     const m = MINERALS[f.id], tier = tierOf(m.rarity), k = f.life / f.max;
-    const x = lay.rockX, y = lay.rockY - lay.R * 0.6 - k * 210 - (f.id === CORE_MINERAL ? 60 : 0);
+    const x = f.x, y = lay.rockY - lay.R * 0.6 - k * 210 - (f.id === CORE_MINERAL ? 60 : 0);
     const a = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
-    const sz = lay.R * (0.42 + tier * 0.025) * easeBack(Math.min(1, f.life / 6)) * (f.id === CORE_MINERAL ? 2 : 1);
+    const sz = lay.rockR * (0.42 + tier * 0.025) * easeBack(Math.min(1, f.life / 6)) * (f.id === CORE_MINERAL ? 2 : 1);
+    if (sz <= 0.5) continue;
     ctx.save(); ctx.globalAlpha = a;
     glow(x, y, sz * (2.2 + tier * 0.25), rarityGlowColor(m.rarity, t), 0.5 + tier * 0.04);
     if (tier >= 5) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.translate(x, y); ctx.rotate(t * 0.8); ctx.fillStyle = rarityGlowColor(m.rarity, t); ctx.globalAlpha = a * 0.18; for (let i = 0; i < 8; i++) { ctx.rotate(TAU / 8); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sz * 0.3, sz * 4); ctx.lineTo(sz * 0.3, sz * 4); ctx.fill(); } ctx.restore(); }
@@ -1860,11 +2385,10 @@ function drawTitle(t) {
   game.px += (tx - game.px) * 0.08; game.py += (ty - game.py) * 0.08;
   drawCave(0, t, game.px, game.py, lay, 0);
   const R = Math.min(110, H * 0.14), rx = W / 2 + 150, ry = lay.ground - R * 0.93, s = R / 95;
-  // demo: the miner swinging at a rock and crystals popping out
   const cyc = (T % 45) / 45;
   if (T % 45 === 0 && titleBurstT !== T) { titleBurstT = T; burstChips(rx - R * 0.8, ry, 5, ROCK_PAL[0]); titleMineral = [2, 4, 6, 8, 10, 12, 14, 16][Math.floor(T / 45) % 8]; }
-  drawRock(rx, ry, R, ROCK_PAL[0], titleRock.shape, (T % 225) / 225, { rot: 0.3 });
-  drawMiner(rx - R - 92 * s, lay.ground, s, Math.min(1, cyc * 1.4), t, cyc < 0.1 ? 1 - cyc * 10 : 0);
+  drawRock(rx, ry, R, ROCK_PAL[0], titleRock.shape, (T % 225) / 224, { rot: 0.3 });
+  drawMiner(rx - R - 92 * s, lay.ground, s, Math.min(1, cyc * 1.4), t, cyc < 0.1 ? 1 - cyc * 10 : 0, SKINS.find(k => k.id === S.skin) || SKINS[0]);
   const m = MINERALS[titleMineral];
   ctx.save(); ctx.globalAlpha = 1 - cyc;
   glow(rx, ry - R - cyc * 120, 80, rarityGlowColor(m.rarity, t), 0.6);
@@ -1873,7 +2397,6 @@ function drawTitle(t) {
   drawParts(); drawMotes([rx - R - 70 * s, lay.ground - 148 * s], 0);
   drawNear(0, game.px, game.py, lay);
   drawLighting(0, [W * 0.5, H * 0.45], t, lay, 0);
-  // logo
   const lx = W / 2, ly = H * 0.2;
   ctx.save(); ctx.translate(lx, ly + Math.sin(t * 1.2) * 4);
   label("YOUR AVERAGE", 0, 0, 40, "#d8cbb8", "center");
@@ -1884,76 +2407,92 @@ function drawTitle(t) {
   ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.save(); ctx.beginPath(); ctx.rect(-500, 20, 1000, 42); ctx.clip(); ctx.fillText("MINING GAME", 0, 104); ctx.restore();
   for (let i = 0; i < 4; i++) star(Math.cos(t + i * 1.7) * 330, 60 + Math.sin(t * 1.3 + i) * 50, 12 * (0.5 + 0.5 * Math.sin(t * 3 + i * 2)), "#fff");
   ctx.restore();
-  // buttons
   const bx = W / 2 - 360, by = H * 0.46;
-  button("play", bx, by, 280, 76, hasProgress() ? "CONTINUE" : "PLAY", { style: "gold", size: 38, onClick: startGame });
+  const modalOpen = !!ui.modal;
+  button("play", bx, by, 280, 76, hasProgress() ? "CONTINUE" : "PLAY", { style: "gold", size: 38, disabled: ui.starting, always: false, onClick: startGame });
   if (hasProgress()) {
-    button("reset", bx, by + 92, 280, 52, ui.resetArmed ? "Sure? Click again!" : "Reset save", { style: ui.resetArmed ? "red" : "stone", size: 22, onClick: () => { if (ui.resetArmed) { S = newSave(); save(); ui.resetArmed = 0; playHis("rockBreak"); game.goldShown = 0; } else { ui.resetArmed = 90; SFX.click(); } } });
-    label(`${fmt(S.gold)} Gold  ·  Best ${fmt(S.high)}  ·  ${S.found.filter(n => n > 0).length}/${MINERALS.length} minerals`, bx + 140, by + 176, 16, "#cbbca8", "center", FONT_B);
+    button("reset", bx, by + 92, 280, 52, ui.resetArmed ? "Sure? Click again!" : "Reset save", { style: ui.resetArmed ? "red" : "stone", size: 22, disabled: ui.starting, onClick: () => { if (ui.resetArmed) { resetAll(); } else { ui.resetArmed = 90; SFX.click(); } } });
+    const st = `${fmt(S.gold)} Gold  ·  Best ${fmt(S.high)}  ·  ${S.found.filter(n => n > 0).length}/${MINERALS.length} minerals`;
+    label(st, bx + 140, by + 176, fitSize(st, 16, 400, FONT_B), "#cbbca8", "center", FONT_B);
   }
-  button("tsnd", bx, by + (hasProgress() ? 196 : 92), 280, 52, "Sound", { icon: settings.muted ? "mute" : "sound", size: 22, onClick: () => { SFX.click(); openModal("sound"); } });
+  button("tsnd", bx, by + (hasProgress() ? 196 : 92), 280, 52, "Sound", { icon: settings.muted ? "mute" : "sound", size: 22, disabled: ui.starting, onClick: () => { SFX.click(); openModal("sound"); } });
   label("Hold the mouse on the rock to mine. Buy upgrades in the shop. Dig deeper.", W / 2, H - 58, 17, "#d8cbb8", "center", FONT_B);
   label("Rock breaking sound: LordSonny (Pixabay)  ·  Pickaxe sound: CreatorsHome  ·  A game by Sixten", W / 2, H - 30, 14, "#9a8c7c", "center", FONT_B, false);
-  if (ui.modal === "sound") drawSound();
+  if (modalOpen && ui.modal === "sound") drawSound();
+}
+function resetAll() {
+  S = newSave(); save(); ui.resetArmed = 0; playHis("rockBreak");
+  game.goldShown = 0; game.incomeHist = []; falling.length = 0; floaters.length = 0;
+  ev.rush = 0; ev.vein = 0; ev.frenzy = 0; music.rush = false; ev.next = 30 * 75;
+  police.state = "off"; police.quota = null; rock.boss = false; rock.pause = 0; newRock();
 }
 function startGame() {
+  if (ui.starting) return;
+  ui.starting = true;
   initAudio(); SFX.click();
   ui.fadeTo = 1;
   setTimeout(() => {
-    screen = "game"; ui.fadeTo = 0; ui.modal = null;
-    music.layer = S.layer; caveCache = null;
+    screen = "game"; ui.fadeTo = 0; ui.modal = null; ui.starting = false;
+    music.layer = S.layer; caveCache = null; game.goldShown = S.gold;
     introAt = S.time + randInt(1, 10);
-    computeLayout();
+    rock.pause = 0; newRock(); computeLayout();
+    fillQuests();
   }, 300);
 }
-function goTitle() { save(); ui.fadeTo = 1; setTimeout(() => { screen = "title"; ui.fadeTo = 0; ui.modal = null; ui.shop = false; ui.dialog = null; police.state = "off"; police.quota = null; music.layer = 0; caveCache = null; }, 300); }
+function goTitle() { save(); ui.fadeTo = 1; setTimeout(() => { screen = "title"; ui.fadeTo = 0; ui.modal = null; ui.shop = false; ui.dialog = null; police.state = "off"; police.quota = null; falling.length = 0; music.layer = 0; caveCache = null; }, 300); }
 
 // =====================================================================
 // 12. MAIN LOOP
 // =====================================================================
 let last = performance.now(), acc = 0;
 function frame(now) {
-  acc += Math.min(0.25, (now - last) / 1000); last = now;
+  acc += Math.min(0.25, Math.max(0, (now - last) / 1000)); last = now;
   computeLayout();
   while (acc >= DT) { acc -= DT; tick(); }
   musicTick();
+  // reset the transform every frame so drawing and clicking always line up
   ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
   ctx.imageSmoothingEnabled = true;
   regions = [];
   const t = T / 30;
-  if (screen === "title") drawTitle(t);
-  else {
-    drawWorld(t);
-    drawShop();
-    drawHUD();
-    drawDialog();
-    drawBanner();
-    drawToasts();
-    if (ui.layerCard > 0) {
-      const k = ui.layerCard > 95 ? easeBack((110 - ui.layerCard) / 15) : ui.layerCard < 20 ? ui.layerCard / 20 : 1;
-      ctx.save(); ctx.globalAlpha = clamp(k, 0, 1);
-      label(`DEPTH ${S.layer + 1}`, lay.cx, H * 0.38, 26, "#cbbca8", "center");
-      label(LAYERS[S.layer].name.toUpperCase(), lay.cx, H * 0.38 + 62, 64, "#ffd447", "center");
-      ctx.restore();
+  try {
+    if (screen === "title") drawTitle(t);
+    else {
+      drawWorld(t);
+      drawShop();
+      drawHUD();
+      drawDialog();
+      drawBanner();
+      drawToasts();
+      if (ui.layerCard > 0) {
+        const k = ui.layerCard > 95 ? easeBack((110 - ui.layerCard) / 15) : ui.layerCard < 20 ? ui.layerCard / 20 : 1;
+        ctx.save(); ctx.globalAlpha = clamp(k, 0, 1);
+        label(`DEPTH ${S.layer + 1}`, lay.cx, H * 0.38, 26, "#cbbca8", "center");
+        label(LAYERS[S.layer].name.toUpperCase(), lay.cx, H * 0.38 + 62, 64, "#ffd447", "center");
+        ctx.restore();
+      }
+      if (ui.modal === "index") drawIndex();
+      else if (ui.modal === "ach") drawAch();
+      else if (ui.modal === "sound") drawSound();
+      else if (ui.modal === "confirm") drawConfirm();
+      else if (ui.modal === "ending") drawEnding();
+      else if (ui.modal === "orders") drawOrders();
+      else if (ui.modal === "perks") drawPerks();
     }
-    if (ui.modal === "index") drawIndex();
-    else if (ui.modal === "ach") drawAch();
-    else if (ui.modal === "sound") drawSound();
-    else if (ui.modal === "confirm") drawConfirm();
-    else if (ui.modal === "ending") drawEnding();
-  }
+  } catch (e) { if (!frame.warned) { frame.warned = true; console.error(e); } }
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
   if (ui.flash) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = clamp(ui.flash.a, 0, 1); ctx.fillStyle = ui.flash.c; ctx.fillRect(0, 0, W, H); ctx.restore(); }
-  // fades: screen changes + going up/down a layer
   ui.fade += (ui.fadeTo - ui.fade) * 0.2;
+  if (Math.abs(ui.fadeTo - ui.fade) < 0.03) ui.fade = ui.fadeTo;   // fades really reach 100%
   let dark = ui.fade;
   if (ui.trans) dark = Math.max(dark, ui.trans.t < 14 ? ui.trans.t / 14 : 1 - (ui.trans.t - 14) / 14);
   if (dark > 0.005) { ctx.fillStyle = `rgba(0,0,0,${clamp(dark, 0, 1)})`; ctx.fillRect(0, 0, W, H); }
   const r = regionAt(mouse.x, mouse.y);
   hoverId = r && r.fn ? r.id : null;
-  canvas.style.cursor = hoverId ? "pointer" : (screen === "game" && overRock() && !ui.modal ? "crosshair" : "default");
+  canvas.style.cursor = hoverId ? "pointer" : (screen === "game" && !ui.modal && (overRock() || falling.some(b => Math.hypot(mouse.x - b.x, mouse.y - b.y) < b.r * 1.3)) ? "crosshair" : "default");
   requestAnimationFrame(frame);
 }
-// wait (briefly) for the game fonts, then start
 function boot() { requestAnimationFrame(frame); }
 try { if (document.fonts && document.fonts.load) Promise.race([Promise.all([document.fonts.load(`40px "Lilita One"`), document.fonts.load(`800 20px "Nunito"`)]), new Promise(r => setTimeout(r, 1500))]).then(boot, boot); else boot(); } catch (e) { boot(); }
 </script>
