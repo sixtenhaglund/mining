@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Average Mining Game</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+/* =====================================================================
+   YOUR AVERAGE MINING GAME
+   Remake of Sixten's Scratch game (project 1232785996) as one web page.
+   Everything runs on the same 480x360 "Scratch stage": x goes right,
+   y goes UP, and (0,0) is the middle — just like in Scratch.
+   Logic runs at 30 ticks per second (Scratch's frame rate), drawing
+   happens as fast as the screen wants.
+
+   File layout:
+     1. CORE   — numbers + rules (minerals, shop, mining). No drawing.
+     2. ASSETS — his costumes (SVG) and sounds from the Scratch project
+     3. GAME   — sprites, input, drawing, title screen, saving
+   ===================================================================== */
+
+// ==CORE==
+const DT = 1 / 30;               // one Scratch frame
+
+// Every mineral, in the SAME order as his "Minerals" sprite checks them.
+// d = "pick random 1 to d, = d?"  (so the chance is 1 in d, but only if
+// every mineral above it in the list already said no).
+// gold = base gold, multiplied by the Gold multiplier.
+// rarity = the label he drew on the costume itself.
+const MINERALS = [
+  { name: "Rock",               d: 0,    gold: 1,      rarity: "Common",    costume: "minerals_rock.svg" },
+  { name: "Granite",            d: 3,    gold: 5,      rarity: "Common",    costume: "minerals_granite.svg" },
+  { name: "Glassum crystal",    d: 5,    gold: 10,     rarity: "Uncommon",  costume: "minerals_glassum-crystal.svg" },
+  { name: "Pixulium crystal",   d: 10,   gold: 20,     rarity: "Uncommon",  costume: "minerals_pixulium-crystal.svg" },
+  { name: "Vedgurium crystal",  d: 15,   gold: 50,     rarity: "Rare",      costume: "minerals_vedgurium-crystal.svg" },
+  { name: "Holeium crystal",    d: 20,   gold: 75,     rarity: "Rare",      costume: "minerals_holeium-crystal.svg" },
+  { name: "Napalmium crystal",  d: 28,   gold: 100,    rarity: "Epic",      costume: "minerals_napalnium-crystal.svg" },
+  { name: "Grenium crystal",    d: 35,   gold: 200,    rarity: "Epic",      costume: "minerals_grenium-crystal.svg" },
+  { name: "Purplodium crystal", d: 40,   gold: 400,    rarity: "Legendary", costume: "minerals_purplodium-crystal.svg" },
+  { name: "Ackium crystal",     d: 55,   gold: 1000,   rarity: "Legendary", costume: "minerals_ackium-crystal.svg" },
+  { name: "Deathbleed crystal", d: 80,   gold: 5000,   rarity: "Mythical",  costume: "minerals_deathbleed-crystal.svg" },
+  { name: "Glimmercrystal",     d: 120,  gold: 10000,  rarity: "Mythical",  costume: "minerals_glimmercrystal.svg" },
+  { name: "Invertia crystal",   d: 200,  gold: 25000,  rarity: "Angelic",   costume: "minerals_invertia-crystal.svg" },
+  { name: "Amberhand crystal",  d: 350,  gold: 50000,  rarity: "Angelic",   costume: "minerals_amberhand-crystal.svg" },
+  { name: "Cosmium crystal",    d: 550,  gold: 100000, rarity: "Celestial", costume: "minerals_cosmium-crystal.svg" },
+  { name: "Amium crystal",      d: 800,  gold: 150000, rarity: "Celestial", costume: "minerals_amium-crystal.svg" },
+  { name: "Rektium crystal",    d: 1000, gold: 250000, rarity: "Exotic",    costume: "minerals_rektium-crystal.svg" },
+];
+// Colours from his "Rarities" chart sprite
+const RARITY_COLOR = {
+  Common: "#a0a0a0", Uncommon: "#26ff00", Rare: "#009bff", Epic: "#ff00df",
+  Legendary: "#e2ff00", Mythical: "#b35cff", Angelic: "#ff6200",
+  Celestial: "#4d55ff", Exotic: "rainbow",
+};
+
+// Real chance of each mineral (the "1 in d" checks happen one after another,
+// so later minerals are a bit rarer than their d says).
+const CHANCE = (() => {
+  const p = new Array(MINERALS.length).fill(0);
+  let left = 1;
+  for (let i = 1; i < MINERALS.length; i++) { p[i] = left / MINERALS[i].d; left -= p[i]; }
+  p[0] = left;
+  return p;
+})();
+
+// Same as his big if-chain: try Granite first, then Glassum, ... else Rock.
+function rollMineral(rand) {
+  for (let i = 1; i < MINERALS.length; i++) {
+    const d = MINERALS[i].d;
+    if (Math.floor(rand() * d) + 1 === d) return i;
+  }
+  return 0;
+}
+
+// --- Shop (prices + effects straight from his "Upgrades" sprites) ---
+// Upgrades 1: money multiplier
+const UPG_MULT = [
+  { cost: 50,    mult: 2 },
+  { cost: 150,   mult: 4 },
+  { cost: 250,   mult: 8 },
+  { cost: 500,   mult: 10 },
+  { cost: 1000,  mult: 20 },
+  { cost: 2500,  mult: 50 },   // his button says 2500 (the code charged 1500)
+  { cost: 10000, mult: 100 },
+];
+// Upgrades 2: mining speed. "Mining speed" = how long each half of the
+// pickaxe swing takes, "Breaking Speed" = wait between rock hits.
+const BASE_SPEED = { mining: 0.48, breaking: 0.96 };
+const UPG_SPEED = [
+  { cost: 50,   mining: 0.45,  breaking: 0.9 },
+  { cost: 100,  mining: 0.375, breaking: 0.75 },
+  { cost: 350,  mining: 0.25,  breaking: 0.5 },
+  { cost: 800,  mining: 0.05,  breaking: 0.1 },
+  { cost: 2000, mining: 0,     breaking: 0.00001 },
+];
+// Drill MK 1-4: his unfinished "z" sprite. Prices + Gold per second
+// come from the text he drew on the buttons.
+const UPG_DRILL = [
+  { cost: 100,  pps: 5 },
+  { cost: 350,  pps: 10 },
+  { cost: 500,  pps: 20 },
+  { cost: 1500, pps: 50 },
+];
+const SHOP = { mult: UPG_MULT, speed: UPG_SPEED, drill: UPG_DRILL };
+const HITS_PER_ROCK = 5;          // Rock -> broken 1..4 -> fully broken
+const BREAK_PAUSE_TICKS = 3;      // his "wait 0.1" before the new rock
+
+function newSave() {
+  return { gold: 0, high: 0, mult: 0, speed: 0, drill: 0, found: new Array(MINERALS.length).fill(0), rocks: 0, police: false };
+}
+function goldMult(s)  { return s.mult === 0 ? 1 : UPG_MULT[s.mult - 1].mult; }
+function speedOf(s)   { return s.speed === 0 ? BASE_SPEED : UPG_SPEED[s.speed - 1]; }
+function drillPPS(s)  { let t = 0; for (let i = 0; i < s.drill; i++) t += UPG_DRILL[i].pps; return t; }
+// Time between hits: the wait block + the frame Scratch spends looping.
+function hitInterval(s) { return speedOf(s).breaking + DT; }
+function nextCost(s, kind) { const l = SHOP[kind]; return s[kind] < l.length ? l[s[kind]].cost : Infinity; }
+// "if gold > cost-1" in his code = you need at least the price
+function canBuy(s, kind) { return s.gold >= nextCost(s, kind); }
+function buy(s, kind) {
+  if (!canBuy(s, kind)) return false;
+  s.gold -= nextCost(s, kind);
+  s[kind]++;
+  return true;
+}
+// Rock broke: roll a mineral and pay out. Returns the mineral index.
+function breakRock(s, rand) {
+  const i = rollMineral(rand);
+  s.gold += MINERALS[i].gold * goldMult(s);
+  s.found[i]++;
+  s.rocks++;
+  if (s.gold > s.high) s.high = s.gold;
+  return i;
+}
+// ==/CORE==
+
+// =====================================================================
+// 2. ASSETS
+// =====================================================================
+// [width, height] of each SVG (his costumes) — needed to draw them at
+// the right size, because an <img> rounds its size to whole pixels.
+const SVG_SIZE = {"highscore-menu_costume1.svg":[31.583,10.087],"index-button.svg":[31.583,10.087],"minerals_ackium-crystal.svg":[41.052,38.336],"minerals_amberhand-crystal.svg":[51.352,42.461],"minerals_amium-crystal.svg":[41.668,40.836],"minerals_cosmium-crystal.svg":[44.778,42.764],"minerals_deathbleed-crystal.svg":[50.507,50.586],"minerals_glassum-crystal.svg":[45.081,41.086],"minerals_glimmercrystal.svg":[41.193,40.461],"minerals_granite.svg":[35.314,41.211],"minerals_grenium-crystal.svg":[42.868,50.961],"minerals_holeium-crystal.svg":[42.123,39.322],"minerals_invertia-crystal.svg":[40.352,38.586],"minerals_napalnium-crystal.svg":[50.888,50.836],"minerals_pixulium-crystal.svg":[45.081,41.211],"minerals_purplodium-crystal.svg":[51.017,38.336],"minerals_rektium-crystal.svg":[41.821,40.836],"minerals_rock.svg":[35.314,40.961],"minerals_vedgurium-crystal.svg":[49.329,39.211],"player2_costume1.svg":[8.526,23.158],"player2_costume2.svg":[8.5,25.499],"player_costume1.svg":[14.54,23.29],"player_costume2.svg":[17.301,23.29],"rock_rock-broken-1.svg":[13.717,13.717],"rock_rock-broken-2.svg":[13.717,13.717],"rock_rock-broken-3.svg":[13.717,13.717],"rock_rock-broken-4.svg":[13.717,13.717],"rock_rock.svg":[13.717,13.717],"shop-button_costume1.svg":[16.7,10.036],"shop_costume1.svg":[36.321,90.803],"sprite1_he-1.svg":[159.486,23.591],"sprite1_you-1.svg":[159.486,23.591],"sprite1_you-2.svg":[159.486,23.591],"sprite1_you-3.svg":[159.486,23.591],"stage_backdrop1.svg":[723.75,548.725],"upgrades-1_sold-out.svg":[21.875,9.75],"upgrades-1_x10-money-multiplier.svg":[21.875,9.75],"upgrades-1_x100-money-multiplier.svg":[21.875,9.75],"upgrades-1_x2-money-multiplier.svg":[21.875,9.75],"upgrades-1_x20-money-multiplier.svg":[21.875,9.75],"upgrades-1_x4-money-multiplier.svg":[21.875,9.75],"upgrades-1_x50-money-multiplier.svg":[21.875,9.75],"upgrades-1_x8-money-multiplier.svg":[21.875,9.75],"upgrades-2_10-mining-speed.svg":[21.875,9.75],"upgrades-2_100-mining-speed.svg":[21.875,9.75],"upgrades-2_25-mining-speed.svg":[21.875,9.75],"upgrades-2_50-mining-speed.svg":[21.875,9.75],"upgrades-2_75-mining-speed.svg":[21.875,9.75],"upgrades-2_sold-out.svg":[21.875,9.75],"z_drill-mk-1.svg":[21.875,9.75],"z_drill-mk-2.svg":[21.875,9.75],"z_drill-mk-3.svg":[21.875,9.75],"z_drill-mk-4.svg":[21.875,9.75],"z_sold-out.svg":[21.875,9.75]};
+
+// A "costume" = picture + its rotation centre (the point that sits on the
+// sprite's x,y — same as the little crosshair in Scratch's paint editor).
+const COSTUMES = {};
+function costume(file, cx, cy) {
+  const [w, h] = SVG_SIZE[file];
+  const img = new Image();
+  img.src = "assets/" + file;
+  return (COSTUMES[file] = { file, img, cx, cy, w, h });
+}
+const C = {
+  backdrop: costume("stage_backdrop1.svg", 361.25, 272.725),
+  rock: [
+    costume("rock_rock.svg", 6.859, 6.859),
+    costume("rock_rock-broken-1.svg", 6.859, 6.859),
+    costume("rock_rock-broken-2.svg", 6.859, 6.859),
+    costume("rock_rock-broken-3.svg", 6.859, 6.859),
+    costume("rock_rock-broken-4.svg", 6.859, 6.859),
+  ],
+  minerals: [
+    [17.556, 26.529], [17.556, 26.529], [22.439, 26.779], [22.439, 26.654], [24.664, 24.904],
+    [20.991, 24.904], [25.373, 30.904], [21.364, 30.904], [25.438, 25.904], [20.335, 24.154],
+    [25.183, 31.654], [20.526, 26.029], [20.106, 24.154], [25.599, 29.779], [22.319, 26.081],
+    [20.757, 26.029], [20.84, 26.029],
+  ].map((c, i) => costume(MINERALS[i].costume, c[0], c[1])),
+  player: [costume("player_costume1.svg", 4.276, 15.04), costume("player_costume2.svg", 4.276, 15.04)],
+  police: [costume("player2_costume1.svg", -7.66, 14.299), costume("player2_costume2.svg", -7.66, 16.48)],
+  bubbles: ["sprite1_you-1.svg", "sprite1_you-2.svg", "sprite1_you-3.svg", "sprite1_he-1.svg"].map(f => costume(f, 43.795, 11.795)),
+  shopButton: costume("shop-button_costume1.svg", 8.35, 5.018),
+  shopPanel: costume("shop_costume1.svg", 18.679, 61.078),
+  highscoreButton: costume("highscore-menu_costume1.svg", 15.791, 5.043),
+  indexButton: costume("index-button.svg", 15.791, 5.043),
+  mult: ["x2", "x4", "x8", "x10", "x20", "x50", "x100"].map(n => costume(`upgrades-1_${n}-money-multiplier.svg`, 10.938, 4.875))
+        .concat([costume("upgrades-1_sold-out.svg", 10.938, 4.875)]),
+  speed: ["10", "25", "50", "75", "100"].map(n => costume(`upgrades-2_${n}-mining-speed.svg`, 10.938, 4.875))
+        .concat([costume("upgrades-2_sold-out.svg", 10.938, 4.875)]),
+  drill: ["1", "2", "3", "4"].map(n => costume(`z_drill-mk-${n}.svg`, 10.938, 4.875))
+        .concat([costume("z_sold-out.svg", 10.938, 4.875)]),
+};
+
+// Sounds. Plain <audio> elements, because the Web Audio way (fetch) is
+// blocked when you open the game straight from a file.
+// Like Scratch: starting a sound that is already playing restarts it.
+const SOUNDS = {
+  pickaxe: "rock_pickaxe-blow-333695.wav",          // by CreatorsHome
+  rockBreak: "rock_small-rock-break-194553-1.wav",  // by LordSonny (Pixabay)
+  shine: "minerals_shine-7-268909.wav",
+  pop: "pop.wav",
+};
+const audio = {};
+for (const k in SOUNDS) { const a = new Audio("assets/" + SOUNDS[k]); a.preload = "auto"; audio[k] = a; }
+audio.shine.volume = 0.6;
+let muted = false;
+function play(name) {
+  if (muted) return;
+  const a = audio[name];
+  try { a.currentTime = 0; const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+}
+function stopAllSounds() { for (const k in audio) { try { audio[k].pause(); } catch (e) {} } }
+
+// =====================================================================
+// 3. GAME
+// =====================================================================
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+let view = 1;   // screen pixels per stage pixel
+
+// Fit the 480x360 stage into the window, keeping 4:3, sharp on hi-DPI.
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const s = Math.min(window.innerWidth / 480, window.innerHeight / 360);
+  canvas.style.width = Math.floor(480 * s) + "px";
+  canvas.style.height = Math.floor(360 * s) + "px";
+  canvas.width = Math.floor(480 * s * dpr);
+  canvas.height = Math.floor(360 * s * dpr);
+  view = canvas.width / 480;
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ---------- saving (localStorage = a little storage box in the browser) ----------
+const SAVE_KEY = "your-average-mining-game-v1";
+function loadSave() {
+  const s = newSave();
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      for (const k of ["gold", "high", "mult", "speed", "drill", "rocks"]) if (typeof d[k] === "number" && isFinite(d[k])) s[k] = d[k];
+      if (Array.isArray(d.found)) d.found.forEach((n, i) => { if (i < s.found.length && typeof n === "number") s.found[i] = n; });
+      s.police = !!d.police;
+      s.mult = Math.min(s.mult, UPG_MULT.length); s.speed = Math.min(s.speed, UPG_SPEED.length); s.drill = Math.min(s.drill, UPG_DRILL.length);
+      if (typeof d.muted === "boolean") muted = d.muted;
+    }
+  } catch (e) {}
+  return s;
+}
+function save() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(Object.assign({}, S, { muted }))); } catch (e) {}
+}
+let S = loadSave();
+function hasProgress() { return S.rocks > 0 || S.gold > 0; }
+
+// ---------- input ----------
+const mouse = { x: 0, y: 0, down: false };   // stage coordinates
+function toStage(e) {
+  const r = canvas.getBoundingClientRect();
+  mouse.x = (e.clientX - r.left) / r.width * 480 - 240;
+  mouse.y = 180 - (e.clientY - r.top) / r.height * 360;
+}
+canvas.addEventListener("pointerdown", e => { toStage(e); mouse.down = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {} onPress(); e.preventDefault(); });
+canvas.addEventListener("pointermove", e => toStage(e));
+window.addEventListener("pointerup", () => { mouse.down = false; });
+window.addEventListener("pointercancel", () => { mouse.down = false; });
+window.addEventListener("blur", () => { mouse.down = false; save(); });
+window.addEventListener("beforeunload", save);
+window.addEventListener("keydown", e => {
+  if (e.key === "m" || e.key === "M") { muted = !muted; if (muted) stopAllSounds(); save(); }
+  if (e.key === "Escape" && screen === "game") { if (ui.index) ui.index = false; else { save(); screen = "title"; } }
+});
+
+// ---------- buttons ----------
+// Like his buttons: they shrink a little when the mouse is on them
+// ("change size by (target - size) / 4" every frame = smooth easing).
+function makeButton(x, y, normal, hover) {
+  return { x, y, size: normal, normal, hover, flash: 0, shake: 0 };
+}
+const btn = {
+  shop: makeButton(-205, -160, 300, 250),
+  high: makeButton(190, -160, 300, 250),
+  index: makeButton(190, -127, 300, 250),
+  mult: makeButton(-187, 95, 350, 300),
+  speed: makeButton(-187, 55, 350, 300),
+  drill: makeButton(-187, 15, 350, 300),
+};
+function overButton(b, c) {
+  const k = b.size / 100;
+  const l = b.x - c.cx * k, t = b.y + c.cy * k;
+  return mouse.x >= l && mouse.x <= l + c.w * k && mouse.y <= t && mouse.y >= t - c.h * k;
+}
+function shopCostume(kind) { return C[kind][S[kind]]; }
+
+// ---------- game state that isn't saved ----------
+const ui = { shop: false, high: false, index: false, pick: 0 };
+let screen = "title";
+const rock = { costume: 0, size: 700, dir: 90, bright: 0 };
+const game = { cool: 0, breakPause: 0, swing: 0, swingT: 0, drillAcc: 0, saveT: 0 };
+const floaters = [];   // the mineral clones that float up and fade
+let toast = null;      // "NEW MINERAL!" text
+const rand = Math.random;
+const randInt = (a, b) => a + Math.floor(rand() * (b - a + 1));
+
+function newRock() {
+  // his reset: turn right (1..180), brightness -15..0, size 650..750
+  rock.costume = 0;
+  rock.dir = (rock.dir + randInt(1, 180)) % 360;
+  rock.bright = randInt(-15, 0);
+  rock.size = randInt(650, 750);
+}
+newRock();
+
+function overRock() {
+  const r = 6.86 * rock.size / 100 * 0.95;
+  const dx = mouse.x - 25, dy = mouse.y - (-95);
+  return dx * dx + dy * dy <= r * r;
+}
+
+// ---------- Rock police (his unfinished Player2 + Sprite1 speech bubbles) ----------
+// He walks in from the right, the two of you talk, and he walks off again.
+const police = { stage: "wait", t: 0, x: 186, costume: 0, line: 0, at: 0 };
+function schedulePolice() { police.stage = S.police ? "done" : "wait"; police.at = randInt(1, 10) * 30; police.t = 0; }
+
+// ---------- press handling (Scratch "when this sprite clicked" fires on press) ----------
+function onPress() {
+  if (screen === "title") { titlePress(); return; }
+  if (ui.index) { indexPress(); return; }
+  if (police.stage === "talk" && mouse.y > 50) { nextLine(); return; }
+  if (ui.shop) {
+    for (const kind of ["mult", "speed", "drill"]) {
+      if (overButton(btn[kind], shopCostume(kind))) {
+        if (S[kind] >= SHOP[kind].length) return;       // sold out
+        if (buy(S, kind)) { play("pop"); btn[kind].flash = 3; save(); }
+        else btn[kind].shake = 8;                       // can't afford: wiggle
+        return;
+      }
+    }
+  }
+  if (overButton(btn.shop, C.shopButton)) { ui.shop = !ui.shop; btn.shop.flash = 3; return; }
+  if (overButton(btn.high, C.highscoreButton)) { ui.high = !ui.high; btn.high.flash = 3; return; }
+  if (overButton(btn.index, C.indexButton)) { ui.index = true; btn.index.flash = 3; return; }
+}
+
+// ---------- one Scratch frame of game logic ----------
+function tick() {
+  for (const k in btn) {
+    const b = btn[k];
+    let c = k === "shop" ? C.shopButton : k === "high" ? C.highscoreButton : k === "index" ? C.indexButton : shopCostume(k);
+    const visible = (k === "mult" || k === "speed" || k === "drill") ? ui.shop : true;
+    const target = visible && !ui.index && overButton(b, c) ? b.hover : b.normal;
+    b.size += (target - b.size) / 4;
+    if (b.flash > 0) b.flash--;
+    if (b.shake > 0) b.shake--;
+  }
+
+  // Mining: hold the mouse on the rock. Each hit = pickaxe sound + next costume.
+  if (game.breakPause > 0) {
+    if (--game.breakPause === 0) newRock();
+  }
+  game.cool -= DT;
+  const mining = mouse.down && overRock() && !ui.index;
+  if (mining && game.breakPause === 0 && game.cool <= 0) {
+    play("pickaxe");
+    rock.costume++;
+    game.cool = hitInterval(S) - DT * 0.5;
+    if (rock.costume >= HITS_PER_ROCK) {
+      // "Rock fully broken": stop sounds, crunch, spawn the mineral
+      stopAllSounds();
+      play("rockBreak");
+      const i = breakRock(S, rand);
+      const isNew = S.found[i] === 1;
+      floaters.push({ i, y: -15, ghost: 0, gained: MINERALS[i].gold * goldMult(S), mult: goldMult(S) });
+      if (MINERALS[i].gold >= 5000) play("shine");
+      if (isNew) toast = { text: "NEW MINERAL: " + MINERALS[i].name + "!", t: 75, color: MINERALS[i].rarity };
+      game.breakPause = BREAK_PAUSE_TICKS;
+    }
+  }
+
+  // Player swing: costume1, wait Mining speed, costume2, wait Mining speed
+  if (game.swingT > 0) game.swingT -= DT;
+  if (game.swingT <= 0) {
+    if (game.swing === 1) { game.swing = 2; game.swingT = speedOf(S).mining + DT; }
+    else if (mining) { game.swing = 1; game.swingT = speedOf(S).mining + DT; }
+    else game.swing = 0;
+  }
+
+  // Mineral clones: move 5 up and ghost +5, 20 times
+  for (const f of floaters) { f.y += 5; f.ghost += 5; }
+  while (floaters.length && floaters[0].ghost >= 100) floaters.shift();
+  if (toast && --toast.t <= 0) toast = null;
+
+  // Drill: Gold per second
+  const pps = drillPPS(S);
+  if (pps > 0) {
+    game.drillAcc += pps * DT;
+    const whole = Math.floor(game.drillAcc);
+    if (whole > 0) { S.gold += whole; game.drillAcc -= whole; }
+  }
+  if (S.gold > S.high) S.high = S.gold;   // his highscore forever-loop
+
+  tickPolice();
+
+  if (++game.saveT >= 60) { game.saveT = 0; save(); }
+}
+
+function tickPolice() {
+  const p = police;
+  if (p.stage === "done") return;
+  p.t++;
+  if (p.stage === "wait") { if (p.t >= p.at) { p.stage = "in"; p.t = 0; p.x = 186; } return; }
+  if (p.stage === "in" || p.stage === "out") {
+    // move 30 steps every 0.1 s, flipping between his two walk costumes
+    if (p.t % 3 === 0) { p.x += p.stage === "in" ? -30 : 30; p.costume = 1 - p.costume; }
+    if (p.t >= 12) {
+      p.t = 0; p.costume = 0;
+      if (p.stage === "in") { p.stage = "talk"; p.line = 0; }
+      else { p.stage = "done"; S.police = true; save(); }
+    }
+    return;
+  }
+  if (p.stage === "talk" && p.t >= 75) nextLine();
+}
+function nextLine() {
+  police.t = 0;
+  if (++police.line >= C.bubbles.length) { police.stage = "out"; }
+}
+
+// ---------- drawing ----------
+// Draw a costume at Scratch position (x, y), size in %, direction in degrees.
+function drawCostume(c, x, y, size = 100, dir = 90, alpha = 1, bright = 0) {
+  if (!c || !c.w || !c.img.complete || !c.img.naturalWidth) return;
+  const k = size / 100;
+  ctx.save();
+  ctx.translate(240 + x, 180 - y);
+  if (dir !== 90) ctx.rotate((dir - 90) * Math.PI / 180);
+  ctx.globalAlpha = alpha;
+  if (bright) ctx.filter = `brightness(${Math.max(0, 1 + bright * 0.016)})`;
+  ctx.drawImage(c.img, -c.cx * k, -c.cy * k, c.w * k, c.h * k);
+  ctx.restore();
+}
+function drawButton(b, c) {
+  const shake = b.shake ? Math.sin(b.shake * 2.2) * 3 : 0;
+  drawCostume(c, b.x + shake, b.y, b.size, 90, 1, b.flash ? -20 : 0);
+}
+
+// numbers with spaces like on his costumes: 250 000
+function fmt(n) {
+  n = Math.floor(n);
+  if (n < 1e15) return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return n.toExponential(2).replace("e+", "e");
+}
+
+// Scratch-style variable monitors
+function largeMonitor(x, y, value) {
+  ctx.font = "bold 15px Helvetica, Arial, sans-serif";
+  const w = Math.max(36, ctx.measureText(value).width + 10);
+  roundRect(x, y, w, 21, 4, "#ff8c1a", "rgba(0,0,0,0.25)");
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(value, x + w / 2, y + 11.5);
+}
+function normalMonitor(x, y, label, value) {
+  ctx.font = "bold 11px Helvetica, Arial, sans-serif";
+  const lw = ctx.measureText(label).width;
+  ctx.font = "11px Helvetica, Arial, sans-serif";
+  const vw = Math.max(30, ctx.measureText(value).width + 10);
+  const w = lw + vw + 16;
+  roundRect(x, y, w, 22, 4, "#e6f0ff", "#c3ccd9");
+  ctx.textBaseline = "middle"; ctx.textAlign = "left";
+  ctx.fillStyle = "#575e75"; ctx.font = "bold 11px Helvetica, Arial, sans-serif";
+  ctx.fillText(label, x + 6, y + 11.5);
+  roundRect(x + lw + 10, y + 3, vw, 16, 4, "#ff8c1a", null);
+  ctx.fillStyle = "#fff"; ctx.font = "11px Helvetica, Arial, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(value, x + lw + 10 + vw / 2, y + 11.5);
+}
+function roundRect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+function rarityFill(rarity, x, w) {
+  const col = RARITY_COLOR[rarity];
+  if (col !== "rainbow") return col;
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  ["#ff0000", "#ff6f00", "#ffea00", "#26ff00", "#009bff", "#b35cff"].forEach((c, i, a) => g.addColorStop(i / (a.length - 1), c));
+  return g;
+}
+function outlinedText(text, x, y, fill, size, align = "left", weight = "bold") {
+  ctx.font = `${weight} ${size}px Helvetica, Arial, sans-serif`;
+  ctx.textAlign = align; ctx.textBaseline = "alphabetic";
+  ctx.lineJoin = "round"; ctx.lineWidth = Math.max(2, size / 5); ctx.strokeStyle = "rgba(0,0,0,0.85)";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = typeof fill === "string" && RARITY_COLOR[fill] ? rarityFill(fill, x - (align === "center" ? ctx.measureText(text).width / 2 : 0), ctx.measureText(text).width) : fill;
+  ctx.fillText(text, x, y);
+}
+
+function drawGame() {
+  drawCostume(C.backdrop, 0, 0);
+
+  // Gold + Gold multiplier monitors (the labels are part of his backdrop)
+  largeMonitor(56, 1, fmt(S.gold));
+  largeMonitor(153, 25, String(goldMult(S)));
+  const pps = drillPPS(S);
+  if (pps) outlinedText(`Drill: +${pps} Gold/s`, 4, 62, "#fbff00", 11);
+
+  drawCostume(C.player[game.swing === 1 ? 0 : 1], -70, -100, 500);
+  if (rock.costume < HITS_PER_ROCK) drawCostume(C.rock[rock.costume], 25, -95, rock.size, rock.dir, 1, rock.bright);
+
+  for (const f of floaters) {
+    const a = 1 - f.ghost / 100;
+    drawCostume(C.minerals[f.i], 25, f.y, 200, 90, a);
+    if (f.mult > 1) { ctx.save(); ctx.globalAlpha = a; outlinedText("x" + f.mult + " = +" + fmt(f.gained), 240 + 25 + 48, 180 - f.y + 4, "#fbff00", 10); ctx.restore(); }
+  }
+
+  if (police.stage === "in" || police.stage === "talk" || police.stage === "out")
+    drawCostume(C.police[police.costume], police.x, -100, 500);
+
+  if (ui.shop) {
+    drawCostume(C.shopPanel, -185, -60, 300);
+    drawButton(btn.mult, shopCostume("mult"));
+    drawButton(btn.speed, shopCostume("speed"));
+    drawButton(btn.drill, shopCostume("drill"));
+  }
+  drawButton(btn.shop, C.shopButton);
+  drawButton(btn.index, C.indexButton);
+  drawButton(btn.high, C.highscoreButton);
+  if (ui.high) normalMonitor(3, 153, "☁ HIGHSCORE", fmt(S.high));
+
+  if (police.stage === "talk") drawCostume(C.bubbles[police.line], -108, 93, 300);
+
+  if (toast) {
+    ctx.save(); ctx.globalAlpha = Math.min(1, toast.t / 15);
+    outlinedText(toast.text, 240 + 25, 92, toast.color, 14, "center");
+    ctx.restore();
+  }
+  if (muted) outlinedText("muted (M)", 474, 354, "#bbb", 9, "right", "normal");
+
+  if (ui.index) drawIndex();
+}
+
+// ---------- Mineral index (his unused MineralIndexOpen variable, made real) ----------
+const IDX = { x: 20, y: 20, w: 440, h: 320, cols: 4, cell: 52, rowH: 50, gx: 32, gy: 60 };
+function indexCellAt(mx, my) {   // mx,my in canvas pixels (0..480 / 0..360)
+  for (let i = 0; i < MINERALS.length; i++) {
+    const cx = IDX.gx + (i % IDX.cols) * IDX.cell, cy = IDX.gy + Math.floor(i / IDX.cols) * IDX.rowH;
+    if (mx >= cx && mx < cx + IDX.cell - 4 && my >= cy && my < cy + IDX.rowH - 4) return i;
+  }
+  return -1;
+}
+function indexPress() {
+  const mx = mouse.x + 240, my = 180 - mouse.y;
+  const close = mx > IDX.x + IDX.w - 34 && mx < IDX.x + IDX.w - 6 && my > IDX.y + 6 && my < IDX.y + 30;
+  if (close || mx < IDX.x || mx > IDX.x + IDX.w || my < IDX.y || my > IDX.y + IDX.h) { ui.index = false; return; }
+  const i = indexCellAt(mx, my);
+  if (i >= 0) { ui.pick = i; play("pop"); }
+}
+// silhouette for minerals you haven't found yet
+const silhouettes = {};
+function silhouette(c, size) {
+  const key = c.file + size;
+  if (silhouettes[key]) return silhouettes[key];
+  if (!c.img.complete || !c.img.naturalWidth) return null;
+  const k = size / 100 * 3;      // draw at 3x so it stays crisp
+  const cv = document.createElement("canvas");
+  cv.width = Math.ceil(c.w * k); cv.height = Math.ceil(c.h * k);
+  const g = cv.getContext("2d");
+  g.drawImage(c.img, 0, 0, c.w * k, c.h * k);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = "#1a1a1a"; g.fillRect(0, 0, cv.width, cv.height);
+  return (silhouettes[key] = cv);
+}
+function drawIndex() {
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0, 0, 480, 360);
+  roundRect(IDX.x, IDX.y, IDX.w, IDX.h, 8, "#3a3a3a", "#000");
+  roundRect(IDX.x + 3, IDX.y + 3, IDX.w - 6, IDX.h - 6, 6, null, "#5f5f5f");
+  const foundCount = S.found.filter(n => n > 0).length;
+  outlinedText("Mineral Index", IDX.x + 14, IDX.y + 26, "#fbff00", 18);
+  outlinedText(`${foundCount} / ${MINERALS.length} found  ·  ${fmt(S.rocks)} rocks broken`, IDX.x + 150, IDX.y + 25, "#ddd", 10, "left", "normal");
+  // close button
+  roundRect(IDX.x + IDX.w - 34, IDX.y + 6, 28, 24, 4, "#fff", "#000");
+  ctx.fillStyle = "#000"; ctx.font = "bold 14px Helvetica, Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("X", IDX.x + IDX.w - 20, IDX.y + 19);
+
+  const mx = mouse.x + 240, my = 180 - mouse.y;
+  const hov = indexCellAt(mx, my);
+  for (let i = 0; i < MINERALS.length; i++) {
+    const cx = IDX.gx + (i % IDX.cols) * IDX.cell, cy = IDX.gy + Math.floor(i / IDX.cols) * IDX.rowH;
+    const w = IDX.cell - 4, h = IDX.rowH - 4;
+    roundRect(cx, cy, w, h, 4, i === ui.pick ? "#6a6a6a" : i === hov ? "#525252" : "#2b2b2b", i === ui.pick ? "#fbff00" : "#1b1b1b");
+    const c = C.minerals[i];
+    // draw just the crystal: clip to the cell so his labels don't spill out
+    ctx.save(); ctx.beginPath(); ctx.rect(cx, cy, w, h); ctx.clip();
+    const sz = 95, ox = cx + w / 2 - 240, oy = 180 - (cy + h / 2 + 2);
+    if (S.found[i]) drawCostume(c, ox, oy, sz);
+    else {
+      const sil = silhouette(c, sz);
+      if (sil) ctx.drawImage(sil, 240 + ox - c.cx * sz / 100, 180 - oy - c.cy * sz / 100, c.w * sz / 100, c.h * sz / 100);
+      outlinedText("?", cx + w / 2, cy + h / 2 + 6, "#888", 16, "center");
+    }
+    ctx.restore();
+  }
+
+  // detail pane on the right
+  const i = ui.pick, m = MINERALS[i], px = 262, pw = 186;
+  roundRect(px, IDX.gy, pw, 260, 6, "#2b2b2b", "#1b1b1b");
+  const known = S.found[i] > 0;
+  if (known) drawCostume(C.minerals[i], px + pw / 2 - 240 - 4, 180 - (IDX.gy + 92), 300);
+  else {
+    const sil = silhouette(C.minerals[i], 300), c = C.minerals[i];
+    if (sil) ctx.drawImage(sil, px + pw / 2 - 4 - c.cx * 3, IDX.gy + 92 - c.cy * 3, c.w * 3, c.h * 3);
+    outlinedText("?", px + pw / 2, IDX.gy + 105, "#999", 40, "center");
+  }
+  const ty = IDX.gy + 190;
+  outlinedText(known ? m.name : "???", px + pw / 2, ty, "#fff", 14, "center");
+  outlinedText(m.rarity, px + pw / 2, ty + 17, m.rarity, 12, "center");
+  outlinedText(`+${fmt(m.gold)} Gold  (x${goldMult(S)} = ${fmt(m.gold * goldMult(S))})`, px + pw / 2, ty + 35, "#fbff00", 10, "center");
+  const ch = CHANCE[i];
+  outlinedText(`Chance: 1 in ${fmt(Math.round(1 / ch))}  (${(ch * 100).toFixed(ch < 0.01 ? 3 : 1)}%)`, px + pw / 2, ty + 50, "#ccc", 10, "center", "normal");
+  outlinedText(`Found: ${fmt(S.found[i])}`, px + pw / 2, ty + 65, "#ccc", 10, "center", "normal");
+}
+
+// ---------- title screen ----------
+const titleBtns = [
+  { id: "play", label: "Play", x: 240, y: 222, w: 120, h: 34 },
+  { id: "reset", label: "Reset save", x: 240, y: 264, w: 120, h: 26 },
+];
+let resetArmed = 0;
+let titleT = 0;
+function titleBtnAt() {
+  const mx = mouse.x + 240, my = 180 - mouse.y;
+  return titleBtns.find(b => (b.id !== "reset" || hasProgress()) && Math.abs(mx - b.x) <= b.w / 2 && Math.abs(my - b.y) <= b.h / 2);
+}
+function titlePress() {
+  const b = titleBtnAt();
+  if (!b) return;
+  if (b.id === "play") startGame();
+  if (b.id === "reset") {
+    if (resetArmed > 0) { S = newSave(); save(); resetArmed = 0; play("rockBreak"); }
+    else resetArmed = 120;
+  }
+}
+// a button drawn in his style: white box, thin black border, 3 stacked texts
+function hisButton(b, label, hover) {
+  const s = hover ? 0.93 : 1;
+  const w = b.w * s, h = b.h * s, x = b.x - w / 2, y = b.y - h / 2;
+  ctx.fillStyle = "#fff"; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
+  ctx.font = `${Math.round(h * 0.62)}px Helvetica, Arial, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const ty = b.y + 1;
+  ctx.fillStyle = "#bfbfbf"; ctx.fillText(label, b.x, ty + 2);
+  ctx.fillStyle = "#808080"; ctx.fillText(label, b.x, ty + 1);
+  ctx.fillStyle = "#000"; ctx.fillText(label, b.x, ty);
+}
+function drawTitle() {
+  titleT++;
+  drawCostume(C.backdrop, 0, 0);
+  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(0, 0, 480, 360);
+  // a slowly turning rock with crystals popping out of it
+  drawCostume(C.rock[0], 0, 40, 700, 90 + titleT * 0.4);
+  const t = (titleT % 60) / 60, mi = [2, 4, 8, 10, 14, 16][Math.floor(titleT / 60) % 6];
+  drawCostume(C.minerals[mi], 0, 60 + t * 60, 150, 90, 1 - t);
+  outlinedText("Your Average", 240, 52, "#fbff00", 26, "center");
+  outlinedText("Mining Game", 240, 84, "#fbff00", 34, "center");
+  const hov = titleBtnAt();
+  hisButton(titleBtns[0], hasProgress() ? "Continue" : "Play", hov === titleBtns[0]);
+  if (hasProgress()) {
+    if (resetArmed > 0) resetArmed--;
+    hisButton(titleBtns[1], resetArmed > 0 ? "Sure? Click again" : "Reset save", hov === titleBtns[1]);
+    outlinedText(`Gold: ${fmt(S.gold)}   ·   Highscore: ${fmt(S.high)}`, 240, 194, "#fff", 11, "center", "normal");
+  }
+  outlinedText("Hold the mouse on the rock to mine. Press Shop for upgrades.", 240, 300, "#ddd", 10, "center", "normal");
+  outlinedText("Rock breaking sound: LordSonny (Pixabay)  ·  Pickaxe sound: CreatorsHome", 240, 322, "#aaa", 9, "center", "normal");
+  outlinedText("A Scratch game by Sixten, remade for the web   ·   M = mute, Esc = menu", 240, 338, "#888", 9, "center", "normal");
+}
+function startGame() {
+  screen = "game";
+  ui.shop = false; ui.index = false; ui.high = false;
+  schedulePolice();
+}
+
+// ---------- main loop ----------
+let last = performance.now(), acc = 0;
+function frame(now) {
+  acc += Math.min(0.25, (now - last) / 1000);
+  last = now;
+  while (acc >= DT) { acc -= DT; if (screen === "game") tick(); }
+  ctx.setTransform(view, 0, 0, view, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.clearRect(0, 0, 480, 360);
+  ctx.fillStyle = "#5f5f5f"; ctx.fillRect(0, 0, 480, 360);
+  if (screen === "title") drawTitle(); else drawGame();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
