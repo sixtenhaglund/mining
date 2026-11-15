@@ -4,9 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your Average Mining Game</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@800&display=swap" rel="stylesheet">
 <style>
-  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
-  body { display: flex; align-items: center; justify-content: center; }
+  html, body { margin: 0; height: 100%; background: #0e0b09; overflow: hidden; }
   canvas { display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
 </style>
 </head>
@@ -15,684 +17,1945 @@
 <script>
 "use strict";
 /* =====================================================================
-   YOUR AVERAGE MINING GAME
-   Remake of Sixten's Scratch game (project 1232785996) as one web page.
-   Everything runs on the same 480x360 "Scratch stage": x goes right,
-   y goes UP, and (0,0) is the middle — just like in Scratch.
-   Logic runs at 30 ticks per second (Scratch's frame rate), drawing
-   happens as fast as the screen wants.
+   YOUR AVERAGE MINING GAME  (version 2)
+   Sixten's Scratch game, rebuilt as a full-window web game.
+   Layer 1 ("Rock Cave") is still HIS game: same minerals, same odds,
+   same shop prices. Everything below it is new.
+
+   Logic runs at 30 ticks a second (Scratch's speed); drawing happens
+   every screen refresh. Everything is drawn with canvas code — no images.
 
    File layout:
-     1. CORE   — numbers + rules (minerals, shop, mining). No drawing.
-     2. ASSETS — his costumes (SVG) and sounds from the Scratch project
-     3. GAME   — sprites, input, drawing, title screen, saving
+     1. CORE    — numbers + rules (minerals, shop, layers). No drawing.
+     2. HELPERS — maths, colours, number formatting
+     3. ART     — minerals, rocks, the Core, miner, Rock police, icons
+     4. CAVE    — background layers, lighting, particles
+     5. SOUND   — his sounds, synth effects, the music
+     6-12.      — saving, layout, input, game logic, UI, main loop
    ===================================================================== */
 
+// 1. CORE
 // ==CORE==
 const DT = 1 / 30;               // one Scratch frame
 
-// Every mineral, in the SAME order as his "Minerals" sprite checks them.
-// d = "pick random 1 to d, = d?"  (so the chance is 1 in d, but only if
-// every mineral above it in the list already said no).
-// gold = base gold, multiplied by the Gold multiplier.
-// rarity = the label he drew on the costume itself.
-const MINERALS = [
-  { name: "Rock",               d: 0,    gold: 1,      rarity: "Common",    costume: "minerals_rock.svg" },
-  { name: "Granite",            d: 3,    gold: 5,      rarity: "Common",    costume: "minerals_granite.svg" },
-  { name: "Glassum crystal",    d: 5,    gold: 10,     rarity: "Uncommon",  costume: "minerals_glassum-crystal.svg" },
-  { name: "Pixulium crystal",   d: 10,   gold: 20,     rarity: "Uncommon",  costume: "minerals_pixulium-crystal.svg" },
-  { name: "Vedgurium crystal",  d: 15,   gold: 50,     rarity: "Rare",      costume: "minerals_vedgurium-crystal.svg" },
-  { name: "Holeium crystal",    d: 20,   gold: 75,     rarity: "Rare",      costume: "minerals_holeium-crystal.svg" },
-  { name: "Napalmium crystal",  d: 28,   gold: 100,    rarity: "Epic",      costume: "minerals_napalnium-crystal.svg" },
-  { name: "Grenium crystal",    d: 35,   gold: 200,    rarity: "Epic",      costume: "minerals_grenium-crystal.svg" },
-  { name: "Purplodium crystal", d: 40,   gold: 400,    rarity: "Legendary", costume: "minerals_purplodium-crystal.svg" },
-  { name: "Ackium crystal",     d: 55,   gold: 1000,   rarity: "Legendary", costume: "minerals_ackium-crystal.svg" },
-  { name: "Deathbleed crystal", d: 80,   gold: 5000,   rarity: "Mythical",  costume: "minerals_deathbleed-crystal.svg" },
-  { name: "Glimmercrystal",     d: 120,  gold: 10000,  rarity: "Mythical",  costume: "minerals_glimmercrystal.svg" },
-  { name: "Invertia crystal",   d: 200,  gold: 25000,  rarity: "Angelic",   costume: "minerals_invertia-crystal.svg" },
-  { name: "Amberhand crystal",  d: 350,  gold: 50000,  rarity: "Angelic",   costume: "minerals_amberhand-crystal.svg" },
-  { name: "Cosmium crystal",    d: 550,  gold: 100000, rarity: "Celestial", costume: "minerals_cosmium-crystal.svg" },
-  { name: "Amium crystal",      d: 800,  gold: 150000, rarity: "Celestial", costume: "minerals_amium-crystal.svg" },
-  { name: "Rektium crystal",    d: 1000, gold: 250000, rarity: "Exotic",    costume: "minerals_rektium-crystal.svg" },
-];
-// Colours from his "Rarities" chart sprite
+// ---- Rarities (his "Rarities" chart, in his order, plus colours) ----
+const RARITIES = ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical", "Angelic", "Celestial", "Exotic", "Acendant", "Transcendant", "Secret", "Admin"];
 const RARITY_COLOR = {
   Common: "#a0a0a0", Uncommon: "#26ff00", Rare: "#009bff", Epic: "#ff00df",
-  Legendary: "#e2ff00", Mythical: "#b35cff", Angelic: "#ff6200",
-  Celestial: "#4d55ff", Exotic: "rainbow",
+  Legendary: "#e2ff00", Mythical: "#9a3cff", Angelic: "#ff6200", Celestial: "#4d55ff",
+  Exotic: "rainbow", Acendant: "#ffffff", Transcendant: "#000000", Secret: "secret", Admin: "admin",
 };
+const tierOf = r => RARITIES.indexOf(r);
 
-// Real chance of each mineral (the "1 in d" checks happen one after another,
-// so later minerals are a bit rarer than their d says).
+// ---- Layers. Layer 0 is HIS game, exactly. The others are new. ----
+// hp = how many pickaxe hits a rock takes (his rock: 5)
+const LAYERS = [
+  { name: "Rock Cave",     hp: 5,  cost: 0 },
+  { name: "Deep Cave",     hp: 8,  cost: 5e6 },
+  { name: "Magma Depths",  hp: 12, cost: 5e9 },
+  { name: "The Void",      hp: 16, cost: 5e12 },
+  { name: "The Core",      hp: 0,  cost: 5e14, core: true },
+];
+const CORE_HP = 25000;
+
+// Every mineral. d = "pick random 1 to d = d?" checked top to bottom
+// (his exact system). d: 0 = the plain rock you get if nothing hits.
+// Layer 0 is his list, untouched. New minerals use his naming style.
+const MINERALS = [
+  // --- Rock Cave (his) ---
+  { layer: 0, name: "Rock",               d: 0,    gold: 1,      rarity: "Common",    costume: "minerals_rock.svg" },
+  { layer: 0, name: "Granite",            d: 3,    gold: 5,      rarity: "Common",    costume: "minerals_granite.svg" },
+  { layer: 0, name: "Glassum crystal",    d: 5,    gold: 10,     rarity: "Uncommon",  costume: "minerals_glassum-crystal.svg" },
+  { layer: 0, name: "Pixulium crystal",   d: 10,   gold: 20,     rarity: "Uncommon",  costume: "minerals_pixulium-crystal.svg" },
+  { layer: 0, name: "Vedgurium crystal",  d: 15,   gold: 50,     rarity: "Rare",      costume: "minerals_vedgurium-crystal.svg" },
+  { layer: 0, name: "Holeium crystal",    d: 20,   gold: 75,     rarity: "Rare",      costume: "minerals_holeium-crystal.svg" },
+  { layer: 0, name: "Napalmium crystal",  d: 28,   gold: 100,    rarity: "Epic",      costume: "minerals_napalnium-crystal.svg" },
+  { layer: 0, name: "Grenium crystal",    d: 35,   gold: 200,    rarity: "Epic",      costume: "minerals_grenium-crystal.svg" },
+  { layer: 0, name: "Purplodium crystal", d: 40,   gold: 400,    rarity: "Legendary", costume: "minerals_purplodium-crystal.svg" },
+  { layer: 0, name: "Ackium crystal",     d: 55,   gold: 1000,   rarity: "Legendary", costume: "minerals_ackium-crystal.svg" },
+  { layer: 0, name: "Deathbleed crystal", d: 80,   gold: 5000,   rarity: "Mythical",  costume: "minerals_deathbleed-crystal.svg" },
+  { layer: 0, name: "Glimmercrystal",     d: 120,  gold: 10000,  rarity: "Mythical",  costume: "minerals_glimmercrystal.svg" },
+  { layer: 0, name: "Invertia crystal",   d: 200,  gold: 25000,  rarity: "Angelic",   costume: "minerals_invertia-crystal.svg" },
+  { layer: 0, name: "Amberhand crystal",  d: 350,  gold: 50000,  rarity: "Angelic",   costume: "minerals_amberhand-crystal.svg" },
+  { layer: 0, name: "Cosmium crystal",    d: 550,  gold: 100000, rarity: "Celestial", costume: "minerals_cosmium-crystal.svg" },
+  { layer: 0, name: "Amium crystal",      d: 800,  gold: 150000, rarity: "Celestial", costume: "minerals_amium-crystal.svg" },
+  { layer: 0, name: "Rektium crystal",    d: 1000, gold: 250000, rarity: "Exotic",    costume: "minerals_rektium-crystal.svg" },
+  // --- Deep Cave ---
+  { layer: 1, name: "Basalt",              d: 0,    gold: 160,      rarity: "Common",    color: "#4a5a70" },
+  { layer: 1, name: "Frostium crystal",    d: 3,    gold: 600,     rarity: "Uncommon",  color: "#a8ecff" },
+  { layer: 1, name: "Mossium crystal",     d: 5,    gold: 1200,     rarity: "Uncommon",  color: "#46b83c" },
+  { layer: 1, name: "Zappium crystal",     d: 10,   gold: 3200,     rarity: "Rare",      color: "#fff23a" },
+  { layer: 1, name: "Bluddium crystal",    d: 20,   gold: 10000,    rarity: "Epic",      color: "#c0102a" },
+  { layer: 1, name: "Skyhand crystal",     d: 40,   gold: 32000,    rarity: "Legendary", color: "#7fd0ff" },
+  { layer: 1, name: "Shadowclaw crystal",  d: 80,   gold: 160000,   rarity: "Mythical",  color: "#2b2540" },
+  { layer: 1, name: "Starium crystal",     d: 200,  gold: 600000,  rarity: "Angelic",   color: "#fff6c0" },
+  { layer: 1, name: "Glitchium crystal",   d: 500,  gold: 2800000,  rarity: "Celestial", color: "#ff2bd6" },
+  { layer: 1, name: "Twinklium crystal",   d: 1500, gold: 16000000, rarity: "Exotic",    color: "#ffffff" },
+  // --- Magma Depths ---
+  { layer: 2, name: "Magma rock",          d: 0,    gold: 20000,      rarity: "Common",    color: "#6a3020" },
+  { layer: 2, name: "Ashium crystal",      d: 3,    gold: 80000,      rarity: "Uncommon",  color: "#8a8a8a" },
+  { layer: 2, name: "Blazium crystal",     d: 6,    gold: 200000,     rarity: "Rare",      color: "#ff7a00" },
+  { layer: 2, name: "Lavaglass crystal",   d: 12,   gold: 600000,     rarity: "Epic",      color: "#ff3d00" },
+  { layer: 2, name: "Scorchium crystal",   d: 25,   gold: 2000000,    rarity: "Legendary", color: "#ffb000" },
+  { layer: 2, name: "Moltenheart crystal", d: 60,   gold: 10000000,    rarity: "Mythical",  color: "#ff2050" },
+  { layer: 2, name: "Phoenixium crystal",  d: 150,  gold: 40000000,   rarity: "Angelic",   color: "#ffd040" },
+  { layer: 2, name: "Sunbleed crystal",    d: 400,  gold: 200000000,  rarity: "Celestial", color: "#fff080" },
+  { layer: 2, name: "Infernium crystal",   d: 1200, gold: 1000000000,  rarity: "Exotic",    color: "#ff0000" },
+  { layer: 2, name: "Acendium crystal",    d: 3000, gold: 4000000000, rarity: "Acendant",  color: "#f4f4ff" },
+  // --- The Void ---
+  { layer: 3, name: "Void stone",          d: 0,     gold: 750000,        rarity: "Common",       color: "#3a2a55" },
+  { layer: 3, name: "Nullium crystal",     d: 3,     gold: 3000000,       rarity: "Uncommon",     color: "#5a5a80" },
+  { layer: 3, name: "Echoium crystal",     d: 6,     gold: 7500000,       rarity: "Rare",         color: "#8a7aff" },
+  { layer: 3, name: "Warpium crystal",     d: 12,    gold: 25000000,       rarity: "Epic",         color: "#c040ff" },
+  { layer: 3, name: "Darkglimmer crystal", d: 25,    gold: 75000000,      rarity: "Legendary",    color: "#401870" },
+  { layer: 3, name: "Riftium crystal",     d: 60,    gold: 350000000,     rarity: "Mythical",     color: "#ff40ff" },
+  { layer: 3, name: "Eternium crystal",    d: 150,   gold: 1500000000,     rarity: "Angelic",      color: "#b0fff0" },
+  { layer: 3, name: "Starbleed crystal",   d: 400,   gold: 7500000000,    rarity: "Celestial",    color: "#6070ff" },
+  { layer: 3, name: "Transium crystal",    d: 1200,  gold: 35000000000,   rarity: "Transcendant", color: "#101010" },
+  { layer: 3, name: "Secretium crystal",   d: 4000,  gold: 150000000000,   rarity: "Secret",       color: "#a00000" },
+  { layer: 3, name: "Adminium crystal",    d: 12000, gold: 750000000000,  rarity: "Admin",        color: "#e0e0e0" },
+  // --- The Core (only one, from breaking the Core) ---
+  { layer: 4, name: "Core crystal",        d: -1,    gold: 10000000000000,         rarity: "Admin",        color: "#ffcc33" },
+];
+MINERALS.forEach((m, i) => { m.id = i; if (!m.costume) m.costume = "new/mineral_" + m.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".svg"; });
+const LAYER_MINERALS = LAYERS.map((_, L) => MINERALS.filter(m => m.layer === L));
+const CORE_MINERAL = MINERALS.length - 1;
+
+// Real chance of each mineral in its layer (for the index)
 const CHANCE = (() => {
   const p = new Array(MINERALS.length).fill(0);
-  let left = 1;
-  for (let i = 1; i < MINERALS.length; i++) { p[i] = left / MINERALS[i].d; left -= p[i]; }
-  p[0] = left;
+  for (const list of LAYER_MINERALS) {
+    let left = 1;
+    for (const m of list) if (m.d > 0) { p[m.id] = left / m.d; left -= p[m.id]; }
+    const rock = list.find(m => m.d === 0);
+    if (rock) p[rock.id] = left;
+  }
   return p;
 })();
 
-// Same as his big if-chain: try Granite first, then Glassum, ... else Rock.
-function rollMineral(rand) {
-  for (let i = 1; i < MINERALS.length; i++) {
-    const d = MINERALS[i].d;
-    if (Math.floor(rand() * d) + 1 === d) return i;
-  }
-  return 0;
+// His if-chain: try each mineral top to bottom, else the plain rock.
+function rollOnce(layer, rand) {
+  const list = LAYER_MINERALS[layer];
+  for (const m of list) if (m.d > 0 && Math.floor(rand() * m.d) + 1 === m.d) return m.id;
+  return list[0].id;
+}
+// Luck = extra rolls, keep the rarest (the one furthest down his list)
+function rollMineral(layer, rolls, rand) {
+  let best = rollOnce(layer, rand);
+  for (let i = 1; i < rolls; i++) { const r = rollOnce(layer, rand); if (r > best) best = r; }
+  return best;
 }
 
-// --- Shop (prices + effects straight from his "Upgrades" sprites) ---
-// Upgrades 1: money multiplier
-const UPG_MULT = [
-  { cost: 50,    mult: 2 },
-  { cost: 150,   mult: 4 },
-  { cost: 250,   mult: 8 },
-  { cost: 500,   mult: 10 },
-  { cost: 1000,  mult: 20 },
-  { cost: 2500,  mult: 50 },   // his button says 2500 (the code charged 1500)
-  { cost: 10000, mult: 100 },
-];
-// Upgrades 2: mining speed. "Mining speed" = how long each half of the
-// pickaxe swing takes, "Breaking Speed" = wait between rock hits.
+// ---- Shop. The first entries of mult/speed/drill are HIS upgrades. ----
+const UPG = {
+  mult: [ // Upgrades 1
+    { cost: 50, v: 2 }, { cost: 150, v: 4 }, { cost: 250, v: 8 }, { cost: 500, v: 10 },
+    { cost: 1000, v: 20 }, { cost: 2500, v: 50 }, { cost: 10000, v: 100 },
+    // new tiers
+    { cost: 2e7, v: 250, label: "X250 Money multiplier" },
+    { cost: 1e10, v: 500, label: "X500 Money multiplier" },
+    { cost: 3e12, v: 1000, label: "X1000 Money multiplier" },
+    { cost: 2e14, v: 2500, label: "X2500 Money multiplier" },
+  ],
+  speed: [ // Upgrades 2  (mining = swing half-time, breaking = wait between hits)
+    { cost: 50, mining: 0.45, breaking: 0.9 }, { cost: 100, mining: 0.375, breaking: 0.75 },
+    { cost: 350, mining: 0.25, breaking: 0.5 }, { cost: 800, mining: 0.05, breaking: 0.1 },
+    { cost: 2000, mining: 0, breaking: 0.00001 },
+  ],
+  drill: [ // his Drill MK 1-4 (from his button text) + new ones
+    { cost: 100, v: 5 }, { cost: 350, v: 10 }, { cost: 500, v: 20 }, { cost: 1500, v: 50 },
+    { cost: 1e7, v: 5000, label: "Drill MK 5", sub: "+5000 Gold P/S" },
+    { cost: 1e10, v: 2000000, label: "Drill MK 6", sub: "+2M Gold P/S" },
+    { cost: 5e12, v: 500000000, label: "Drill MK 7", sub: "+500M Gold P/S" },
+  ],
+  pick: [ // pickaxe power = rock damage per hit
+    { cost: 3e6, v: 2, label: "Iron pickaxe" },
+    { cost: 2e9, v: 3, label: "Gold pickaxe" },
+    { cost: 1e12, v: 4, label: "Diamond pickaxe" },
+    { cost: 3e14, v: 6, label: "Rektium pickaxe" },
+  ],
+  luck: [ // extra rolls per rock, keep the rarest
+    { cost: 1e6, v: 2, label: "Lucky charm I" },
+    { cost: 3e9, v: 3, label: "Lucky charm II" },
+    { cost: 2e12, v: 4, label: "Lucky charm III" },
+  ],
+};
 const BASE_SPEED = { mining: 0.48, breaking: 0.96 };
-const UPG_SPEED = [
-  { cost: 50,   mining: 0.45,  breaking: 0.9 },
-  { cost: 100,  mining: 0.375, breaking: 0.75 },
-  { cost: 350,  mining: 0.25,  breaking: 0.5 },
-  { cost: 800,  mining: 0.05,  breaking: 0.1 },
-  { cost: 2000, mining: 0,     breaking: 0.00001 },
-];
-// Drill MK 1-4: his unfinished "z" sprite. Prices + Gold per second
-// come from the text he drew on the buttons.
-const UPG_DRILL = [
-  { cost: 100,  pps: 5 },
-  { cost: 350,  pps: 10 },
-  { cost: 500,  pps: 20 },
-  { cost: 1500, pps: 50 },
-];
-const SHOP = { mult: UPG_MULT, speed: UPG_SPEED, drill: UPG_DRILL };
-const HITS_PER_ROCK = 5;          // Rock -> broken 1..4 -> fully broken
-const BREAK_PAUSE_TICKS = 3;      // his "wait 0.1" before the new rock
+const BREAK_PAUSE_TICKS = 3;          // his "wait 0.1" before the new rock
+const RUSH_MULT = 3;
 
 function newSave() {
-  return { gold: 0, high: 0, mult: 0, speed: 0, drill: 0, found: new Array(MINERALS.length).fill(0), rocks: 0, police: false };
+  return {
+    v: 2, gold: 0, high: 0, mult: 0, speed: 0, drill: 0, pick: 0, luck: 0,
+    layer: 0, maxLayer: 0, coreHP: CORE_HP, coreBroken: false, rebirths: 0,
+    found: new Array(MINERALS.length).fill(0), rocks: 0, police: false, quotas: 0,
+    ach: {}, time: 0, totalGold: 0, boulders: 0, ended: false,
+  };
 }
-function goldMult(s)  { return s.mult === 0 ? 1 : UPG_MULT[s.mult - 1].mult; }
-function speedOf(s)   { return s.speed === 0 ? BASE_SPEED : UPG_SPEED[s.speed - 1]; }
-function drillPPS(s)  { let t = 0; for (let i = 0; i < s.drill; i++) t += UPG_DRILL[i].pps; return t; }
-// Time between hits: the wait block + the frame Scratch spends looping.
+const lvl = (s, k) => s[k] === 0 ? null : UPG[k][s[k] - 1];
+function goldMult(s)  { const u = lvl(s, "mult"); return u ? u.v : 1; }
+function rebirthMult(s) { return Math.pow(2, s.rebirths); }
+function speedOf(s)   { return lvl(s, "speed") || BASE_SPEED; }
+function pickPower(s) { const u = lvl(s, "pick"); return u ? u.v : 1; }
+function luckRolls(s) { const u = lvl(s, "luck"); return u ? u.v : 1; }
+function drillPPS(s)  { let t = 0; for (let i = 0; i < s.drill; i++) t += UPG.drill[i].v; return t * rebirthMult(s); }
 function hitInterval(s) { return speedOf(s).breaking + DT; }
-function nextCost(s, kind) { const l = SHOP[kind]; return s[kind] < l.length ? l[s[kind]].cost : Infinity; }
-// "if gold > cost-1" in his code = you need at least the price
-function canBuy(s, kind) { return s.gold >= nextCost(s, kind); }
-function buy(s, kind) {
-  if (!canBuy(s, kind)) return false;
-  s.gold -= nextCost(s, kind);
-  s[kind]++;
+function nextCost(s, k) {
+  if (k === "dig") return s.maxLayer + 1 < LAYERS.length ? LAYERS[s.maxLayer + 1].cost : Infinity;
+  return s[k] < UPG[k].length ? UPG[k][s[k]].cost : Infinity;
+}
+function canBuy(s, k) { return s.gold >= nextCost(s, k); }
+function buy(s, k) {
+  if (!canBuy(s, k)) return false;
+  s.gold -= nextCost(s, k);
+  if (k === "dig") { s.maxLayer++; s.layer = s.maxLayer; } else s[k]++;
   return true;
 }
-// Rock broke: roll a mineral and pay out. Returns the mineral index.
-function breakRock(s, rand) {
-  const i = rollMineral(rand);
-  s.gold += MINERALS[i].gold * goldMult(s);
-  s.found[i]++;
+function addGold(s, n) { s.gold += n; s.totalGold += n; if (s.gold > s.high) s.high = s.gold; }
+function rockHP(s) { return LAYERS[s.layer].core ? s.coreHP : LAYERS[s.layer].hp; }
+// payout for a mineral right now
+function payout(s, id, rush) { return MINERALS[id].gold * goldMult(s) * rebirthMult(s) * (rush ? RUSH_MULT : 1); }
+function breakRock(s, rand, opts = {}) {
+  const id = rollMineral(s.layer, luckRolls(s) + (opts.vein ? 2 : 0), rand);
+  addGold(s, payout(s, id, opts.rush));
+  s.found[id]++;
   s.rocks++;
-  if (s.gold > s.high) s.high = s.gold;
-  return i;
+  return id;
+}
+function rebirth(s) {
+  const keep = { found: s.found, ach: s.ach, rebirths: s.rebirths + 1, high: s.high, police: true, quotas: s.quotas, time: s.time, totalGold: s.totalGold, boulders: s.boulders, rocks: s.rocks, ended: s.ended };
+  const n = Object.assign(newSave(), keep);
+  return n;
 }
 // ==/CORE==
 
 // =====================================================================
-// 2. ASSETS
+// 2. HELPERS — maths, colours, random numbers, number formatting
 // =====================================================================
-// [width, height] of each SVG (his costumes) — needed to draw them at
-// the right size, because an <img> rounds its size to whole pixels.
-const SVG_SIZE = {"highscore-menu_costume1.svg":[31.583,10.087],"index-button.svg":[31.583,10.087],"minerals_ackium-crystal.svg":[41.052,38.336],"minerals_amberhand-crystal.svg":[51.352,42.461],"minerals_amium-crystal.svg":[41.668,40.836],"minerals_cosmium-crystal.svg":[44.778,42.764],"minerals_deathbleed-crystal.svg":[50.507,50.586],"minerals_glassum-crystal.svg":[45.081,41.086],"minerals_glimmercrystal.svg":[41.193,40.461],"minerals_granite.svg":[35.314,41.211],"minerals_grenium-crystal.svg":[42.868,50.961],"minerals_holeium-crystal.svg":[42.123,39.322],"minerals_invertia-crystal.svg":[40.352,38.586],"minerals_napalnium-crystal.svg":[50.888,50.836],"minerals_pixulium-crystal.svg":[45.081,41.211],"minerals_purplodium-crystal.svg":[51.017,38.336],"minerals_rektium-crystal.svg":[41.821,40.836],"minerals_rock.svg":[35.314,40.961],"minerals_vedgurium-crystal.svg":[49.329,39.211],"player2_costume1.svg":[8.526,23.158],"player2_costume2.svg":[8.5,25.499],"player_costume1.svg":[14.54,23.29],"player_costume2.svg":[17.301,23.29],"rock_rock-broken-1.svg":[13.717,13.717],"rock_rock-broken-2.svg":[13.717,13.717],"rock_rock-broken-3.svg":[13.717,13.717],"rock_rock-broken-4.svg":[13.717,13.717],"rock_rock.svg":[13.717,13.717],"shop-button_costume1.svg":[16.7,10.036],"shop_costume1.svg":[36.321,90.803],"sprite1_he-1.svg":[159.486,23.591],"sprite1_you-1.svg":[159.486,23.591],"sprite1_you-2.svg":[159.486,23.591],"sprite1_you-3.svg":[159.486,23.591],"stage_backdrop1.svg":[723.75,548.725],"upgrades-1_sold-out.svg":[21.875,9.75],"upgrades-1_x10-money-multiplier.svg":[21.875,9.75],"upgrades-1_x100-money-multiplier.svg":[21.875,9.75],"upgrades-1_x2-money-multiplier.svg":[21.875,9.75],"upgrades-1_x20-money-multiplier.svg":[21.875,9.75],"upgrades-1_x4-money-multiplier.svg":[21.875,9.75],"upgrades-1_x50-money-multiplier.svg":[21.875,9.75],"upgrades-1_x8-money-multiplier.svg":[21.875,9.75],"upgrades-2_10-mining-speed.svg":[21.875,9.75],"upgrades-2_100-mining-speed.svg":[21.875,9.75],"upgrades-2_25-mining-speed.svg":[21.875,9.75],"upgrades-2_50-mining-speed.svg":[21.875,9.75],"upgrades-2_75-mining-speed.svg":[21.875,9.75],"upgrades-2_sold-out.svg":[21.875,9.75],"z_drill-mk-1.svg":[21.875,9.75],"z_drill-mk-2.svg":[21.875,9.75],"z_drill-mk-3.svg":[21.875,9.75],"z_drill-mk-4.svg":[21.875,9.75],"z_sold-out.svg":[21.875,9.75]};
-
-// A "costume" = picture + its rotation centre (the point that sits on the
-// sprite's x,y — same as the little crosshair in Scratch's paint editor).
-const COSTUMES = {};
-function costume(file, cx, cy) {
-  const [w, h] = SVG_SIZE[file];
-  const img = new Image();
-  img.src = "assets/" + file;
-  return (COSTUMES[file] = { file, img, cx, cy, w, h });
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeOut = t => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+const easeBack = t => { t = clamp(t, 0, 1); const c = 1.7; return Math.max(0, 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2)); };
+// A "seeded" random generator: the same seed always gives the same numbers,
+// so a mineral or rock looks the same every time we draw it.
+function hashStr(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function seeded(seed) {
+  return function () {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
-const C = {
-  backdrop: costume("stage_backdrop1.svg", 361.25, 272.725),
-  rock: [
-    costume("rock_rock.svg", 6.859, 6.859),
-    costume("rock_rock-broken-1.svg", 6.859, 6.859),
-    costume("rock_rock-broken-2.svg", 6.859, 6.859),
-    costume("rock_rock-broken-3.svg", 6.859, 6.859),
-    costume("rock_rock-broken-4.svg", 6.859, 6.859),
-  ],
-  minerals: [
-    [17.556, 26.529], [17.556, 26.529], [22.439, 26.779], [22.439, 26.654], [24.664, 24.904],
-    [20.991, 24.904], [25.373, 30.904], [21.364, 30.904], [25.438, 25.904], [20.335, 24.154],
-    [25.183, 31.654], [20.526, 26.029], [20.106, 24.154], [25.599, 29.779], [22.319, 26.081],
-    [20.757, 26.029], [20.84, 26.029],
-  ].map((c, i) => costume(MINERALS[i].costume, c[0], c[1])),
-  player: [costume("player_costume1.svg", 4.276, 15.04), costume("player_costume2.svg", 4.276, 15.04)],
-  police: [costume("player2_costume1.svg", -7.66, 14.299), costume("player2_costume2.svg", -7.66, 16.48)],
-  bubbles: ["sprite1_you-1.svg", "sprite1_you-2.svg", "sprite1_you-3.svg", "sprite1_he-1.svg"].map(f => costume(f, 43.795, 11.795)),
-  shopButton: costume("shop-button_costume1.svg", 8.35, 5.018),
-  shopPanel: costume("shop_costume1.svg", 18.679, 61.078),
-  highscoreButton: costume("highscore-menu_costume1.svg", 15.791, 5.043),
-  indexButton: costume("index-button.svg", 15.791, 5.043),
-  mult: ["x2", "x4", "x8", "x10", "x20", "x50", "x100"].map(n => costume(`upgrades-1_${n}-money-multiplier.svg`, 10.938, 4.875))
-        .concat([costume("upgrades-1_sold-out.svg", 10.938, 4.875)]),
-  speed: ["10", "25", "50", "75", "100"].map(n => costume(`upgrades-2_${n}-mining-speed.svg`, 10.938, 4.875))
-        .concat([costume("upgrades-2_sold-out.svg", 10.938, 4.875)]),
-  drill: ["1", "2", "3", "4"].map(n => costume(`z_drill-mk-${n}.svg`, 10.938, 4.875))
-        .concat([costume("z_sold-out.svg", 10.938, 4.875)]),
-};
+function hexRGB(h) { h = h.replace("#", ""); if (h.length === 3) h = h.split("").map(c => c + c).join(""); const n = parseInt(h, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function rgb(a, alpha = 1) { return `rgba(${a[0] | 0},${a[1] | 0},${a[2] | 0},${alpha})`; }
+// shade("#ff0000", 0.4) = 40% towards white, -0.4 = 40% towards black
+function shade(hex, f, alpha = 1) {
+  const c = hexRGB(hex), t = f < 0 ? 0 : 255, p = Math.abs(f);
+  return rgb([c[0] + (t - c[0]) * p, c[1] + (t - c[1]) * p, c[2] + (t - c[2]) * p], alpha);
+}
+function hsl(h, s, l, a = 1) { return `hsla(${h},${s}%,${l}%,${a})`; }
 
-// Sounds. Plain <audio> elements, because the Web Audio way (fetch) is
-// blocked when you open the game straight from a file.
-// Like Scratch: starting a sound that is already playing restarts it.
-const SOUNDS = {
+// numbers: 250 000 like on his costumes, then 1.25M, 3.4B ...
+const SUFFIX = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc"];
+function fmt(n) {
+  n = Math.floor(n);
+  if (n < 1e6) return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  let i = Math.floor(Math.log10(n) / 3);
+  if (i >= SUFFIX.length) return n.toExponential(2).replace("e+", "e");
+  const v = n / Math.pow(1000, i);
+  return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + SUFFIX[i];
+}
+function fmtTime(sec) { sec = Math.floor(sec); const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = sec % 60; return (h ? h + "h " : "") + m + "m " + (h ? "" : s + "s"); }
+
+const FONT_T = '"Lilita One", "Trebuchet MS", Impact, sans-serif';   // headings + numbers
+const FONT_B = '"Nunito", "Segoe UI", Arial, sans-serif';            // body text
+const INK = "#160f0b";   // the dark outline colour every drawing shares
+
+// =====================================================================
+// 3. ART — everything is drawn with code (no images), in one style:
+//    thick dark outlines, a light side and a shadow side, glow for magic.
+//    His Scratch costumes are the reference for every design.
+// =====================================================================
+let ctx;   // set up later, all drawing functions use it
+
+function rarityColor(r, t = 0) {
+  const c = RARITY_COLOR[r];
+  if (c === "rainbow") return hsl((t * 120) % 360, 100, 60);
+  if (c === "secret") return (Math.sin(t * 4) > 0) ? "#ff2020" : "#600000";
+  if (c === "admin") return hsl(0, 0, 50 + Math.sin(t * 3) * 45);
+  return c;
+}
+function rarityGlowColor(r, t) {
+  if (r === "Transcendant") return "#9a7aff";
+  if (r === "Acendant") return "#ffffff";
+  return rarityColor(r, t);
+}
+
+// ---------- Minerals ----------
+// Looks for HIS 17 minerals, taken from the colours in his costumes.
+const VIS = {
+  "Rock":               { type: "lump", c: ["#7a7a7a", "#a5a5a5", "#494949"] },
+  "Granite":            { type: "lump", c: ["#9a634e", "#c08670", "#6e4032"], speck: true },
+  "Glassum crystal":    { type: "cluster", n: 1, c: ["#e8f6ff", "#ffffff", "#9fb8c8"], alpha: 0.72 },
+  "Pixulium crystal":   { type: "cluster", n: 3, pixel: ["#4eff00", "#ca00ff", "#ff0000", "#0090ff", "#ffea00"], c: ["#0090ff", "#80c8ff", "#00407a"] },
+  "Vedgurium crystal":  { type: "cluster", n: 4, c: ["#2de300", "#7bff5a", "#1a7a00"], tip: "#d5ffca" },
+  "Holeium crystal":    { type: "cluster", n: 3, c: ["#00c5f6", "#7ff0ff", "#006c87"], holes: true },
+  "Napalmium crystal":  { type: "cluster", n: 3, grad: ["#ff5600", "#ffd200"], c: ["#ff8a00", "#ffd200", "#a03000"] },
+  "Grenium crystal":    { type: "cluster", n: 5, c: ["#13ff00", "#80ff77", "#076f00"] },
+  "Purplodium crystal": { type: "cluster", n: 3, grad: ["#b200ff", "#ffffff"], c: ["#c850ff", "#ffffff", "#5a0080"] },
+  "Ackium crystal":     { type: "gem", grad: ["#0007ff", "#00ffd8"], c: ["#0080ff", "#00ffd8", "#00157a"] },
+  "Deathbleed crystal": { type: "cluster", n: 3, c: ["#c40000", "#ff3a3a", "#420000"], drip: "#a00000" },
+  "Glimmercrystal":     { type: "gem", c: ["#fbff00", "#ffffb0", "#9a9000"], sparkle: true },
+  "Invertia crystal":   { type: "cluster", n: 3, c: ["#050505", "#3a3a3a", "#000000"], invert: true },
+  "Amberhand crystal":  { type: "hand", c: ["#ff7a00", "#ffc070", "#803e00"], stone: "#808080" },
+  "Cosmium crystal":    { type: "cluster", n: 4, c: ["#ff00ea", "#ff8bf5", "#54004d"], stars: true },
+  "Amium crystal":      { type: "gem", grad: ["#1d00ff", "#ff0000"], c: ["#8a00a0", "#ff6060", "#20007a"] },
+  "Rektium crystal":    { type: "cluster", n: 5, grad: ["#29ff00", "#ff0000"], c: ["#a0a000", "#ffff80", "#503000"] },
+  // a few new ones with special looks
+  "Glitchium crystal":  { type: "cluster", n: 3, pixel: ["#ff2bd6", "#00fff0", "#ffffff", "#2b00ff"], c: ["#ff2bd6", "#00fff0", "#40004a"] },
+  "Twinklium crystal":  { type: "gem", c: ["#ffffff", "#ffffff", "#9ab0d0"], sparkle: true },
+  "Starium crystal":    { type: "cluster", n: 4, c: ["#fff6c0", "#ffffff", "#b09a40"], stars: true },
+  "Shadowclaw crystal": { type: "hand", c: ["#2b2540", "#5a5080", "#0c0a14"], stone: "#3a3a48" },
+  "Moltenheart crystal":{ type: "gem", c: ["#ff2050", "#ff90a0", "#700010"], drip: "#ff6000" },
+  "Infernium crystal":  { type: "cluster", n: 5, grad: ["#ff0000", "#ffd000"], c: ["#ff3000", "#ffd000", "#600000"] },
+  "Acendium crystal":   { type: "gem", c: ["#f4f4ff", "#ffffff", "#a0a0c0"], sparkle: true },
+  "Eternium crystal":   { type: "cluster", n: 4, c: ["#b0fff0", "#ffffff", "#2a8a7a"], sparkle: true },
+  "Starbleed crystal":  { type: "cluster", n: 4, c: ["#6070ff", "#c0c8ff", "#10184a"], stars: true, drip: "#3040ff" },
+  "Transium crystal":   { type: "cluster", n: 4, c: ["#101010", "#3a3a3a", "#000000"], invert: true, stars: true },
+  "Secretium crystal":  { type: "gem", grad: ["#ff0000", "#000000"], c: ["#a00000", "#ff4040", "#200000"] },
+  "Adminium crystal":   { type: "gem", grad: ["#000000", "#ffffff"], c: ["#808080", "#ffffff", "#101010"], sparkle: true },
+  "Core crystal":       { type: "gem", grad: ["#ff6a00", "#fff6a0"], c: ["#ffcc33", "#ffffff", "#8a3a00"], sparkle: true },
+};
+function visOf(m) {
+  if (m._vis) return m._vis;
+  let v = VIS[m.name];
+  if (!v) {
+    const r = seeded(hashStr(m.name));
+    v = m.d === 0 ? { type: "lump", c: [m.color, shade(m.color, 0.3), shade(m.color, -0.5)] }
+      : { type: r() < 0.25 ? "gem" : "cluster", n: 2 + Math.floor(r() * 4), c: [m.color, shade(m.color, 0.5), shade(m.color, -0.55)] };
+    if (m.layer === 3 && m.d !== 0) v.stars = true;
+  }
+  // geometry, made once from the name so it never changes
+  const r = seeded(hashStr(m.name) ^ 0x9e37);
+  const g = { shards: [], lump: [], specks: [] };
+  if (v.type === "lump") {
+    for (let i = 0; i < 11; i++) { const a = i / 11 * TAU; g.lump.push([Math.cos(a) * (0.62 + r() * 0.2), Math.sin(a) * (0.5 + r() * 0.16) + 0.1]); }
+    for (let i = 0; i < 9; i++) g.specks.push([(r() - 0.5) * 0.9, (r() - 0.5) * 0.6 + 0.1, 0.04 + r() * 0.05]);
+  } else if (v.type === "hand") {
+    for (let i = 0; i < 5; i++) { const a = -0.85 + i * 0.42 + (r() - 0.5) * 0.1; g.shards.push({ a, len: (i === 0 ? 0.55 : 0.75 + r() * 0.2) * (i === 2 ? 1.08 : 1), w: 0.16 + r() * 0.03, x: (i - 2) * 0.07 }); }
+  } else if (v.type === "cluster") {
+    const n = v.n;
+    for (let i = 0; i < n; i++) {
+      const k = n === 1 ? 0 : i / (n - 1) - 0.5;
+      g.shards.push({ a: k * 1.25 + (r() - 0.5) * 0.25, len: (n === 1 ? 1.05 : 0.95 - Math.abs(k) * 0.55) * (0.85 + r() * 0.25), w: n === 1 ? 0.34 : 0.22 + r() * 0.08, x: k * 0.5 });
+    }
+    g.shards.sort((a, b) => a.len - b.len);   // short ones at the back
+    // tallest in the middle should be drawn last
+    g.shards.sort((a, b) => Math.abs(b.x) - Math.abs(a.x));
+  }
+  for (let i = 0; i < 6; i++) g.specks.push([(r() - 0.5) * 1.6, -r() * 1.1, 0.5 + r()]);
+  v.geo = g;
+  return (m._vis = v);
+}
+
+// Draw a mineral centred at x,y. s = its size (about its radius).
+// opts.sil = silhouette (not found yet), opts.t = time for sparkles
+function drawMineral(m, x, y, s, opts = {}) {
+  const v = visOf(m), g = v.geo, t = opts.t || 0;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  const sil = opts.sil;
+  const outline = sil ? "#2c2620" : v.invert ? "#f0f0f0" : INK;
+  const lw = Math.max(1.5, s * 0.07);
+  if (v.type === "lump") {
+    path(g.lump.map(p => [p[0] * s, p[1] * s]), true);
+    if (sil) ctx.fillStyle = "#141110";
+    else { const gr = ctx.createRadialGradient(-s * 0.25, -s * 0.15, s * 0.05, 0, 0, s * 0.8); gr.addColorStop(0, v.c[1]); gr.addColorStop(0.55, v.c[0]); gr.addColorStop(1, v.c[2]); ctx.fillStyle = gr; }
+    ctx.fill();
+    if (!sil) {
+      ctx.save(); ctx.clip();
+      for (const sp of g.specks.slice(0, 9)) { ctx.fillStyle = v.speck ? shade(v.c[0], sp[2] > 0.06 ? 0.5 : -0.45, 0.9) : shade(v.c[2], 0, 0.6); ctx.beginPath(); ctx.ellipse(sp[0] * s, sp[1] * s, sp[2] * s * 1.4, sp[2] * s, 0, 0, TAU); ctx.fill(); }
+      ctx.restore();
+    }
+    ctx.lineWidth = lw; ctx.strokeStyle = outline; ctx.stroke();
+  } else if (v.type === "gem") {
+    drawGem(v, s, sil, outline, lw);
+  } else {
+    // little rock base the shards grow out of
+    if (v.type === "hand") {
+      ctx.fillStyle = sil ? "#141110" : v.stone; path([[-s * 0.42, s * 0.42], [s * 0.42, s * 0.42], [s * 0.3, s * 0.18], [-s * 0.32, s * 0.16]], true); ctx.fill();
+      ctx.lineWidth = lw; ctx.strokeStyle = outline; ctx.stroke();
+    }
+    for (const sh of g.shards) drawShard(v, sh, s, sil, outline, lw);
+    if (!sil) {
+      ctx.fillStyle = "#3b322b"; ctx.beginPath(); ctx.ellipse(0, s * 0.42, s * 0.5, s * 0.13, 0, 0, TAU); ctx.fill();
+      ctx.lineWidth = lw * 0.8; ctx.strokeStyle = INK; ctx.stroke();
+    }
+  }
+  if (!sil) {
+    if (v.drip) {
+      ctx.fillStyle = v.drip;
+      for (let i = 0; i < 3; i++) { const dx = (i - 1) * s * 0.3, ph = (t * 0.7 + i * 0.37) % 1; const dy = s * 0.46 + ph * s * 0.35; ctx.globalAlpha = 1 - ph; ctx.beginPath(); ctx.arc(dx, dy, s * 0.05, 0, TAU); ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
+    if (v.stars || v.sparkle) {
+      for (let i = 0; i < g.specks.length; i++) {
+        const sp = g.specks[i], tw = 0.5 + 0.5 * Math.sin(t * 5 + i * 2.1);
+        if (sp[2] === undefined || sp[1] > 0) continue;
+        star(sp[0] * s * 0.6, sp[1] * s * 0.8, s * 0.09 * tw * (v.sparkle ? 1.4 : 1), v.sparkle ? "#ffffff" : v.c[1], tw);
+      }
+    }
+  }
+  ctx.restore();
+}
+function drawShard(v, sh, s, sil, outline, lw) {
+  ctx.save();
+  ctx.translate(sh.x * s, s * 0.38);
+  ctx.rotate(sh.a);
+  const L = sh.len * s, w = sh.w * s;
+  const body = [[-w / 2, 0], [w / 2, 0], [w / 2, -L * 0.72], [0, -L], [-w / 2, -L * 0.72]];
+  path(body, true);
+  if (sil) { ctx.fillStyle = "#141110"; ctx.fill(); }
+  else {
+    ctx.globalAlpha = v.alpha || 1;
+    if (v.grad) { const gr = ctx.createLinearGradient(0, 0, 0, -L); gr.addColorStop(0, v.grad[0]); gr.addColorStop(1, v.grad[1]); ctx.fillStyle = gr; }
+    else ctx.fillStyle = v.c[0];
+    ctx.fill();
+    ctx.save(); ctx.clip();
+    if (v.pixel) {   // Pixulium: made of coloured pixels
+      const cell = Math.max(2, w / 3);
+      const r = seeded((sh.a * 1000) | 0);
+      for (let yy = -L; yy < 0; yy += cell) for (let xx = -w / 2; xx < w / 2; xx += cell) { ctx.fillStyle = v.pixel[Math.floor(r() * v.pixel.length)]; ctx.fillRect(xx, yy, cell + 0.5, cell + 0.5); }
+    }
+    // shadow facet (right) and light facet (left)
+    ctx.fillStyle = "rgba(0,0,0,0.28)"; path([[0, 0], [w / 2, 0], [w / 2, -L * 0.72], [0, -L]], true); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.22)"; path([[-w / 2, 0], [-w * 0.15, 0], [-w * 0.15, -L * 0.8], [-w / 2, -L * 0.72]], true); ctx.fill();
+    if (v.tip) { ctx.fillStyle = v.tip; path([[-w / 2, -L * 0.72], [w / 2, -L * 0.72], [0, -L]], true); ctx.fill(); }
+    if (v.holes) { ctx.fillStyle = shade(v.c[2], -0.4); for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc((i % 2 ? 0.15 : -0.12) * w, -L * (0.2 + i * 0.22), w * 0.13, 0, TAU); ctx.fill(); } }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    // shine line
+    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = lw * 0.6;
+    ctx.beginPath(); ctx.moveTo(-w * 0.3, -L * 0.12); ctx.lineTo(-w * 0.3, -L * 0.6); ctx.stroke();
+  }
+  path(body, true);
+  ctx.lineWidth = lw; ctx.strokeStyle = outline; ctx.stroke();
+  ctx.restore();
+}
+function drawGem(v, s, sil, outline, lw) {
+  const R = s * 0.62, top = -s * 0.15;
+  const pts = [[-R, top], [-R * 0.55, top - R * 0.5], [R * 0.55, top - R * 0.5], [R, top], [0, top + R * 1.05]];
+  path(pts, true);
+  if (sil) { ctx.fillStyle = "#141110"; ctx.fill(); }
+  else {
+    if (v.grad) { const gr = ctx.createLinearGradient(-R, top - R, R, top + R); gr.addColorStop(0, v.grad[0]); gr.addColorStop(1, v.grad[1]); ctx.fillStyle = gr; }
+    else ctx.fillStyle = v.c[0];
+    ctx.fill();
+    // facets
+    const f = [
+      [[-R, top], [-R * 0.55, top - R * 0.5], [-R * 0.2, top], 0.25],
+      [[-R * 0.2, top], [-R * 0.55, top - R * 0.5], [R * 0.55, top - R * 0.5], 0.4],
+      [[-R * 0.2, top], [R * 0.55, top - R * 0.5], [R, top], 0.05],
+      [[-R, top], [-R * 0.2, top], [0, top + R * 1.05], 0.12],
+      [[-R * 0.2, top], [R, top], [0, top + R * 1.05], -0.3],
+    ];
+    for (const q of f) { path(q.slice(0, 3), true); ctx.fillStyle = q[3] > 0 ? `rgba(255,255,255,${q[3]})` : `rgba(0,0,0,${-q[3]})`; ctx.fill(); }
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = lw * 0.5;
+    ctx.beginPath(); ctx.moveTo(-R, top); ctx.lineTo(R, top); ctx.stroke();
+  }
+  path(pts, true);
+  ctx.lineWidth = lw; ctx.strokeStyle = outline; ctx.stroke();
+}
+function path(pts, close) {
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  if (close) ctx.closePath();
+}
+function smoothBlob(pts) {   // smooth closed shape through points
+  const n = pts.length, mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  ctx.beginPath();
+  let m = mid(pts[n - 1], pts[0]); ctx.moveTo(m[0], m[1]);
+  for (let i = 0; i < n; i++) { const p = pts[i], q = mid(p, pts[(i + 1) % n]); ctx.quadraticCurveTo(p[0], p[1], q[0], q[1]); }
+  ctx.closePath();
+}
+function star(x, y, r, color, alpha = 1) {   // 4-point sparkle
+  if (r <= 0.2) return;
+  ctx.save(); ctx.globalAlpha *= alpha; ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.quadraticCurveTo(x, y, x, y + r);
+  ctx.quadraticCurveTo(x, y, x - r, y); ctx.quadraticCurveTo(x, y, x, y - r);
+  ctx.fill(); ctx.restore();
+}
+function glow(x, y, r, color, alpha = 1) {
+  if (r <= 1) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.globalAlpha *= alpha; ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.restore();
+}
+
+// ---------- Rocks ----------
+// His rock: a round grey boulder (#525252) with darker spots, cracking in
+// 4 stages. Each layer has its own kind of rock.
+const ROCK_PAL = [
+  { body: "#5a5a5a", light: "#8a8a8a", dark: "#2e2e2e", spot: "#434343", crack: INK },                 // his rock
+  { body: "#3f4c5e", light: "#6f86a3", dark: "#1c2430", spot: "#313b4a", crack: INK, frost: true },     // Basalt
+  { body: "#4a2a22", light: "#7a4a38", dark: "#1e0f0b", spot: "#2e1a15", crack: "#ff7a1a", hot: true }, // Magma rock
+  { body: "#2c2140", light: "#5a4880", dark: "#120c1e", spot: "#1e1630", crack: "#c070ff", hot: true },  // Void stone
+];
+function rockShape(seed) {
+  const r = seeded(seed), pts = [], spots = [], cracks = [];
+  for (let i = 0; i < 14; i++) { const a = i / 14 * TAU; const rad = 0.88 + r() * 0.14; pts.push([Math.cos(a) * rad, Math.sin(a) * rad * 0.94]); }
+  for (let i = 0; i < 5; i++) { const a = r() * TAU, d = r() * 0.55; spots.push([Math.cos(a) * d, Math.sin(a) * d, 0.12 + r() * 0.14, 0.08 + r() * 0.1, r() * TAU]); }
+  for (let i = 0; i < 6; i++) {
+    let a = r() * TAU, x = Math.cos(a) * 0.15, y = Math.sin(a) * 0.15; const c = [[x, y]];
+    for (let k = 0; k < 4; k++) { a += (r() - 0.5) * 1.1; const l = 0.17 + r() * 0.08; x += Math.cos(a) * l; y += Math.sin(a) * l; c.push([x, y]); }
+    cracks.push(c);
+  }
+  return { pts, spots, cracks };
+}
+function drawRock(x, y, R, pal, shape, dmg, o = {}) {
+  if (!(R > 1)) return;
+  ctx.save();
+  // ground shadow
+  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(x, y + R * 0.9, R * 0.95, R * 0.18, 0, 0, TAU); ctx.fill();
+  ctx.translate(x, y);
+  ctx.scale(o.sx || 1, o.sy || 1);
+  ctx.rotate(o.rot || 0);
+  const P = shape.pts.map(p => [p[0] * R, p[1] * R]);
+  smoothBlob(P);
+  const g = ctx.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.1, 0, 0, R * 1.15);
+  g.addColorStop(0, pal.light); g.addColorStop(0.5, pal.body); g.addColorStop(1, pal.dark);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.save(); ctx.clip();
+  for (const s of shape.spots) {   // his darker spots
+    ctx.fillStyle = pal.spot; ctx.beginPath(); ctx.ellipse(s[0] * R, s[1] * R, s[2] * R, s[3] * R, s[4], 0, TAU); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = R * 0.02; ctx.beginPath(); ctx.ellipse(s[0] * R, s[1] * R, s[2] * R, s[3] * R, s[4], Math.PI * 1.1, Math.PI * 1.7); ctx.stroke();
+  }
+  if (pal.frost) { ctx.fillStyle = "rgba(200,235,255,0.18)"; ctx.beginPath(); ctx.ellipse(-R * 0.2, -R * 0.75, R * 0.7, R * 0.3, 0, 0, TAU); ctx.fill(); }
+  // rim light from the lantern
+  ctx.strokeStyle = "rgba(255,220,170,0.18)"; ctx.lineWidth = R * 0.08;
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.9, Math.PI * 1.05, Math.PI * 1.55); ctx.stroke();
+  // cracks grow with damage (like his "Rock broken 1..4")
+  const n = shape.cracks.length;
+  for (let k = 0; k < n; k++) {
+    const rev = clamp(dmg * n * 1.1 - k, 0, 1);
+    if (rev <= 0) continue;
+    const c = shape.cracks[k], segs = (c.length - 1) * rev;
+    ctx.beginPath(); ctx.moveTo(c[0][0] * R, c[0][1] * R);
+    for (let i = 1; i <= Math.ceil(segs); i++) {
+      const f = Math.min(1, segs - (i - 1)), a = c[i - 1], b = c[i];
+      ctx.lineTo((a[0] + (b[0] - a[0]) * f) * R, (a[1] + (b[1] - a[1]) * f) * R);
+    }
+    if (pal.hot) { ctx.strokeStyle = pal.crack; ctx.lineWidth = R * 0.07; ctx.globalAlpha = 0.35; ctx.stroke(); ctx.globalAlpha = 1; ctx.lineWidth = R * 0.03; ctx.stroke(); }
+    else { ctx.strokeStyle = INK; ctx.lineWidth = R * 0.045; ctx.stroke(); ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = R * 0.015; ctx.stroke(); }
+  }
+  if (o.flash) { ctx.fillStyle = `rgba(255,255,255,${o.flash})`; ctx.fillRect(-R * 1.2, -R * 1.2, R * 2.4, R * 2.4); }
+  if (o.bright) { ctx.fillStyle = `rgba(0,0,0,${-o.bright / 100 * 1.6})`; ctx.fillRect(-R * 1.2, -R * 1.2, R * 2.4, R * 2.4); }
+  ctx.restore();
+  smoothBlob(P);
+  ctx.lineWidth = Math.max(2, R * 0.05); ctx.strokeStyle = INK; ctx.lineJoin = "round"; ctx.stroke();
+  ctx.restore();
+}
+
+// ---------- The Core ----------
+const CORE_PLATES = (() => { const r = seeded(77), p = []; for (let i = 0; i < 14; i++) { const a = i / 14 * TAU + r() * 0.2; p.push({ a, w: 0.42 + r() * 0.12, d: 0.62 + r() * 0.2, k: r() }); } return p; })();
+function drawCore(x, y, R, hpFrac, t, flash) {
+  glow(x, y, R * 2.6, "rgba(255,150,40,0.55)", 0.8 + Math.sin(t * 2) * 0.1);
+  ctx.save(); ctx.translate(x, y);
+  const g = ctx.createRadialGradient(-R * 0.2, -R * 0.25, R * 0.05, 0, 0, R);
+  g.addColorStop(0, "#fffbe0"); g.addColorStop(0.35, "#ffd040"); g.addColorStop(0.75, "#ff6a00"); g.addColorStop(1, "#8a1800");
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fillStyle = g; ctx.fill();
+  // rock shell plates that break off as HP goes down
+  for (const p of CORE_PLATES) {
+    if (p.k > hpFrac) continue;
+    ctx.save(); ctx.rotate(p.a + t * 0.05);
+    ctx.beginPath(); ctx.arc(0, 0, R * 1.01, -p.w / 2, p.w / 2); ctx.arc(0, 0, R * p.d, p.w / 2, -p.w / 2, true); ctx.closePath();
+    const pg = ctx.createLinearGradient(0, -R, 0, R); pg.addColorStop(0, "#5a3a2c"); pg.addColorStop(1, "#2a1810");
+    ctx.fillStyle = pg; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+    ctx.restore();
+  }
+  // energy rings
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 2; i++) {
+    ctx.save(); ctx.rotate(i ? 0.5 : -0.4); ctx.strokeStyle = `rgba(255,240,180,${0.5 - i * 0.15})`;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 1.35, R * 0.28, 0, t * (i ? 1 : -1.3), t * (i ? 1 : -1.3) + 4.4); ctx.stroke(); ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke();
+  if (flash) { ctx.fillStyle = `rgba(255,255,255,${flash})`; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+
+// ---------- Characters ----------
+// His miner: a stick figure with a white head, one eye and an orange hard
+// hat, holding a pickaxe. Drawn bigger and chunkier, same idea.
+function limb(pts, w, color = "#1e1c26") {
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.strokeStyle = INK; ctx.lineWidth = w + 4; ctx.stroke();
+  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.stroke();
+}
+function drawHead(kind, x, y, r, face = 1, t = 0) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU);
+  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+  g.addColorStop(0, "#ffffff"); g.addColorStop(1, "#d8d4cc");
+  ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = Math.max(2, r * 0.14); ctx.strokeStyle = INK; ctx.stroke();
+  // eye (his: a single black dot looking forward)
+  const blink = (Math.sin(t * 0.9 + (kind === "police" ? 2 : 0)) > 0.985) ? 0.15 : 1;
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.ellipse(face * r * 0.42, -r * 0.02, r * 0.14, r * 0.17 * blink, 0, 0, TAU); ctx.fill();
+  if (kind === "miner") {
+    // orange hard hat with the line on top + a lamp
+    ctx.beginPath(); ctx.arc(0, -r * 0.18, r * 1.04, Math.PI, 0); ctx.closePath();
+    const hg = ctx.createLinearGradient(0, -r * 1.2, 0, 0); hg.addColorStop(0, "#ffc04a"); hg.addColorStop(1, "#e07800");
+    ctx.fillStyle = hg; ctx.fill(); ctx.lineWidth = Math.max(2, r * 0.14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 1.28, -r * 0.18); ctx.lineTo(r * 1.28, -r * 0.18); ctx.lineWidth = r * 0.22; ctx.strokeStyle = INK; ctx.stroke();
+    ctx.lineWidth = r * 0.12; ctx.strokeStyle = "#e07800"; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -r * 0.3); ctx.lineTo(0, -r * 1.15); ctx.lineWidth = r * 0.12; ctx.strokeStyle = INK; ctx.stroke();
+    ctx.beginPath(); ctx.arc(face * r * 0.62, -r * 0.62, r * 0.22, 0, TAU); ctx.fillStyle = "#fff3a8"; ctx.fill(); ctx.lineWidth = r * 0.1; ctx.stroke();
+  } else {
+    // his Rock police: a grey cap (#4c4c4c) — plus a gold badge
+    ctx.beginPath(); ctx.moveTo(-r * 1.0, -r * 0.35); ctx.lineTo(-r * 0.95, -r * 0.95); ctx.quadraticCurveTo(0, -r * 1.45, r * 0.95, -r * 0.95); ctx.lineTo(r * 1.0, -r * 0.35); ctx.closePath();
+    const cg = ctx.createLinearGradient(0, -r * 1.4, 0, -r * 0.3); cg.addColorStop(0, "#6a6a72"); cg.addColorStop(1, "#3a3a40");
+    ctx.fillStyle = cg; ctx.fill(); ctx.lineWidth = Math.max(2, r * 0.14); ctx.strokeStyle = INK; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.1 * face, -r * 0.35); ctx.lineTo(face * r * 1.45, -r * 0.3); ctx.lineWidth = r * 0.24; ctx.stroke();
+    ctx.lineWidth = r * 0.12; ctx.strokeStyle = "#2a2a30"; ctx.stroke();
+    ctx.save(); ctx.translate(0, -r * 0.85); ctx.fillStyle = "#ffcf3a"; ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.12 : r * 0.27; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fill(); ctx.lineWidth = r * 0.07; ctx.strokeStyle = INK; ctx.stroke(); ctx.restore();
+    // moustache
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.ellipse(face * r * 0.45, r * 0.38, r * 0.3, r * 0.1, face * 0.15, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+// swing: 0 = pickaxe down on the rock, 1 = raised (his costume1 / costume2)
+function drawMiner(x, gy, s, swing, t, smear) {
+  ctx.save(); ctx.translate(x, gy); ctx.scale(s, s);
+  const bob = Math.sin(t * 2.2) * 1.5;
+  const hip = [0, -64 + bob * 0.3], neck = [2, -112 + bob], sh = [3, -104 + bob];
+  const ang = lerp(0.55, -2.25, easeOut(swing));
+  const hand = [sh[0] + Math.cos(ang) * 36, sh[1] + Math.sin(ang) * 36];
+  // pickaxe behind the front arm
+  ctx.save(); ctx.translate(hand[0], hand[1]); ctx.rotate(ang);
+  if (smear > 0) { ctx.strokeStyle = `rgba(255,255,255,${smear * 0.35})`; ctx.lineWidth = 26; ctx.beginPath(); ctx.arc(-36, 0, 120, -0.9, 0.0); ctx.stroke(); }
+  ctx.fillStyle = "#8a5a2b"; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-18, -5, 112, 10, 5) : ctx.rect(-18, -5, 112, 10); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(-14, -3.5, 104, 3);
+  // pick head (his grey #7b7b7b), curved both ways
+  ctx.translate(92, 0);
+  ctx.beginPath(); ctx.moveTo(-6, -8); ctx.quadraticCurveTo(14, -36, 2, -62); ctx.quadraticCurveTo(26, -34, 10, -6);
+  ctx.lineTo(10, 6); ctx.quadraticCurveTo(26, 34, 2, 58); ctx.quadraticCurveTo(14, 34, -6, 8); ctx.closePath();
+  const mg = ctx.createLinearGradient(-6, 0, 20, 0); mg.addColorStop(0, "#b8b8c0"); mg.addColorStop(1, "#6a6a72");
+  ctx.fillStyle = mg; ctx.fill(); ctx.lineWidth = 3.5; ctx.stroke();
+  ctx.restore();
+  // legs + body + arms
+  limb([hip, [-8, -32], [-18, 0]], 9);
+  limb([hip, [12, -32], [20, 0]], 9);
+  limb([hip, neck], 11);
+  limb([sh, [sh[0] + Math.cos(ang + 0.9) * 20, sh[1] + Math.sin(ang + 0.9) * 20], hand], 8);
+  drawHead("miner", 4, -134 + bob, 22, 1, t);
+  ctx.restore();
+}
+function drawPolice(x, gy, s, walk, t, face = -1, talking = false) {
+  ctx.save(); ctx.translate(x, gy); ctx.scale(s, s);
+  const sw = Math.sin(walk) * 0.5, bob = Math.abs(Math.cos(walk)) * -3 + Math.sin(t * 2) * 1;
+  const hip = [0, -64 + bob], neck = [0, -112 + bob];
+  limb([hip, [Math.sin(sw) * 24, Math.cos(sw) * 32 - 64 + 32 + bob * 0.5], [Math.sin(sw) * 30, 0]], 9, "#262a3a");
+  limb([hip, [-Math.sin(sw) * 24, -64 + 32 + bob * 0.5], [-Math.sin(sw) * 30, 0]], 9, "#262a3a");
+  limb([hip, neck], 11, "#262a3a");
+  const wave = talking ? Math.sin(t * 8) * 0.4 - 1.2 : sw;
+  limb([[0, -104 + bob], [face * 12 + Math.sin(wave) * 14, -80 + bob], [face * 20 + Math.sin(wave) * 26, -60 + bob + (talking ? -30 : 0)]], 8, "#262a3a");
+  limb([[0, -104 + bob], [-face * 10 - Math.sin(sw) * 10, -80 + bob], [-face * 14 - Math.sin(sw) * 20, -58 + bob]], 8, "#262a3a");
+  // badge on chest
+  ctx.fillStyle = "#ffcf3a"; ctx.beginPath(); ctx.arc(face * 6, -96 + bob, 4.5, 0, TAU); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = INK; ctx.stroke();
+  drawHead("police", 0, -134 + bob, 22, face, t);
+  ctx.restore();
+}
+
+// ---------- Drill machine (his Drill MK 1-4 + new ones) ----------
+const DRILL_TINT = ["#8a8a92", "#8a8a92", "#9a9aa8", "#a8a8b8", "#b0b0c8", "#ffcc33", "#40e0ff", "#c060ff"];
+function drawDrill(x, gy, s, lvl, t, tipX) {
+  if (lvl <= 0) return;
+  ctx.save(); ctx.translate(x, gy); ctx.scale(s, s);
+  const tint = DRILL_TINT[lvl] || "#8a8a92";
+  const shake = Math.sin(t * 60) * 0.8;
+  // body
+  ctx.fillStyle = "#3a3632"; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.rect(-10, -26, 64, 26); ctx.fill(); ctx.stroke();
+  // hazard stripe
+  ctx.save(); ctx.beginPath(); ctx.rect(-10, -12, 64, 8); ctx.clip();
+  for (let i = -2; i < 10; i++) { ctx.fillStyle = i % 2 ? "#ffcc00" : "#1a1a1a"; ctx.beginPath(); ctx.moveTo(-10 + i * 9, -4); ctx.lineTo(-4 + i * 9, -12); ctx.lineTo(1 + i * 9, -12); ctx.lineTo(-5 + i * 9, -4); ctx.fill(); }
+  ctx.restore();
+  ctx.fillStyle = tint; ctx.beginPath(); ctx.rect(4, -70 + shake, 44, 44); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(7, -67 + shake, 38, 6);
+  // level lights
+  for (let i = 0; i < Math.min(7, lvl); i++) { ctx.fillStyle = (Math.floor(t * 4) + i) % 3 ? "#7dff6a" : "#3a8a30"; ctx.beginPath(); ctx.arc(10 + i * 5.5, -34 + shake, 2, 0, TAU); ctx.fill(); }
+  // spinning bit pointing left at the rock
+  const bx = 4, by = -48 + shake, len = Math.max(30, (x - tipX) / s - 4);
+  ctx.save(); ctx.translate(bx, by);
+  ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(-len, 0); ctx.lineTo(0, 14); ctx.closePath();
+  const bg = ctx.createLinearGradient(0, -14, 0, 14); bg.addColorStop(0, "#e0e0e8"); bg.addColorStop(1, "#5a5a66");
+  ctx.fillStyle = bg; ctx.fill();
+  ctx.save(); ctx.clip(); ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = 3;
+  const off = (t * 90) % 12;
+  for (let i = -2; i < len / 12 + 2; i++) { ctx.beginPath(); ctx.moveTo(-i * 12 + off, -16); ctx.lineTo(-i * 12 + off - 8, 16); ctx.stroke(); }
+  ctx.restore();
+  ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+}
+
+// ---------- Icons for the UI ----------
+function drawCoin(x, y, r) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU);
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+  g.addColorStop(0, "#fff2a0"); g.addColorStop(0.6, "#ffc21a"); g.addColorStop(1, "#c07800");
+  ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = Math.max(1.5, r * 0.16); ctx.strokeStyle = "#5a3500"; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, r * 0.62, 0, TAU); ctx.lineWidth = Math.max(1, r * 0.1); ctx.strokeStyle = "rgba(120,70,0,0.6)"; ctx.stroke();
+  star(x, y, r * 0.42, "#fff8d0");
+  ctx.restore();
+}
+function drawIcon(name, x, y, s, color = "#f4ead8") {
+  ctx.save(); ctx.translate(x, y);
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const st = (w = s * 0.14, c = color) => { ctx.lineWidth = w; ctx.strokeStyle = c; ctx.stroke(); };
+  switch (name) {
+    case "mult": drawCoin(-s * 0.18, s * 0.12, s * 0.32); drawCoin(s * 0.14, -s * 0.12, s * 0.32);
+      ctx.font = `${s * 0.42}px ${FONT_T}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineWidth = s * 0.1; ctx.strokeStyle = INK; ctx.strokeText("x", s * 0.3, s * 0.3); ctx.fillStyle = "#fff"; ctx.fillText("x", s * 0.3, s * 0.3); break;
+    case "speed": ctx.beginPath(); ctx.moveTo(s * 0.1, -s * 0.48); ctx.lineTo(-s * 0.28, s * 0.06); ctx.lineTo(0, s * 0.06); ctx.lineTo(-s * 0.1, s * 0.48); ctx.lineTo(s * 0.3, -s * 0.08); ctx.lineTo(s * 0.02, -s * 0.08); ctx.closePath();
+      ctx.fillStyle = "#ffe14a"; ctx.fill(); st(s * 0.09, INK); break;
+    case "drill": ctx.beginPath(); ctx.moveTo(-s * 0.2, -s * 0.36); ctx.lineTo(s * 0.2, -s * 0.36); ctx.lineTo(0, s * 0.46); ctx.closePath(); ctx.fillStyle = "#c8c8d0"; ctx.fill(); st(s * 0.09, INK);
+      ctx.beginPath(); ctx.moveTo(-s * 0.16, -s * 0.16); ctx.lineTo(s * 0.12, -s * 0.06); ctx.moveTo(-s * 0.1, s * 0.06); ctx.lineTo(s * 0.08, s * 0.14); st(s * 0.06, INK);
+      ctx.fillStyle = "#3a3632"; ctx.fillRect(-s * 0.28, -s * 0.5, s * 0.56, s * 0.16); ctx.strokeStyle = INK; ctx.lineWidth = s * 0.07; ctx.strokeRect(-s * 0.28, -s * 0.5, s * 0.56, s * 0.16); break;
+    case "pick": ctx.rotate(-0.7); ctx.beginPath(); ctx.moveTo(0, -s * 0.1); ctx.lineTo(0, s * 0.5); st(s * 0.16, INK); st(s * 0.09, "#a06a32");
+      ctx.beginPath(); ctx.moveTo(-s * 0.46, s * 0.02); ctx.quadraticCurveTo(0, -s * 0.36, s * 0.46, s * 0.02); ctx.quadraticCurveTo(0, -s * 0.2, -s * 0.46, s * 0.02); ctx.fillStyle = color === "#f4ead8" ? "#b8b8c0" : color; ctx.fill(); st(s * 0.08, INK); break;
+    case "luck": for (let i = 0; i < 4; i++) { ctx.save(); ctx.rotate(i * Math.PI / 2 + 0.2); ctx.beginPath(); ctx.arc(0, -s * 0.2, s * 0.18, 0, TAU); ctx.fillStyle = "#3ed04a"; ctx.fill(); st(s * 0.07, INK); ctx.restore(); }
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(s * 0.1, s * 0.3, s * 0.3, s * 0.46); st(s * 0.08, "#2a8a30"); break;
+    case "dig": ctx.beginPath(); ctx.moveTo(0, -s * 0.45); ctx.lineTo(0, s * 0.2); st(s * 0.18, INK); st(s * 0.1, "#ffcc33");
+      ctx.beginPath(); ctx.moveTo(-s * 0.26, -s * 0.02); ctx.lineTo(0, s * 0.3); ctx.lineTo(s * 0.26, -s * 0.02); st(s * 0.18, INK); st(s * 0.1, "#ffcc33");
+      ctx.beginPath(); ctx.moveTo(-s * 0.45, s * 0.46); ctx.lineTo(s * 0.45, s * 0.46); st(s * 0.1, "#8a6a4a"); break;
+    case "rebirth": ctx.beginPath(); ctx.arc(0, 0, s * 0.32, 0.4, TAU - 0.6); st(s * 0.18, INK); st(s * 0.1, "#7dff6a");
+      ctx.beginPath(); ctx.moveTo(s * 0.32, -s * 0.3); ctx.lineTo(s * 0.36, -s * 0.02); ctx.lineTo(s * 0.08, -s * 0.06); st(s * 0.1, "#7dff6a"); break;
+    case "book": ctx.fillStyle = "#8a3a2a"; ctx.beginPath(); ctx.rect(-s * 0.36, -s * 0.42, s * 0.72, s * 0.84); ctx.fill(); st(s * 0.09, INK);
+      ctx.fillStyle = "#f4ead8"; ctx.fillRect(-s * 0.26, -s * 0.36, s * 0.08, s * 0.72); drawMineralIcon(s * 0.06, -s * 0.02, s * 0.24); break;
+    case "trophy": ctx.beginPath(); ctx.moveTo(-s * 0.32, -s * 0.4); ctx.lineTo(s * 0.32, -s * 0.4); ctx.quadraticCurveTo(s * 0.32, s * 0.12, 0, s * 0.14); ctx.quadraticCurveTo(-s * 0.32, s * 0.12, -s * 0.32, -s * 0.4);
+      ctx.fillStyle = color === "#f4ead8" ? "#ffc21a" : color; ctx.fill(); st(s * 0.09, INK);
+      ctx.beginPath(); ctx.moveTo(0, s * 0.14); ctx.lineTo(0, s * 0.3); st(s * 0.12, INK); ctx.fillStyle = "#6a4a2a"; ctx.fillRect(-s * 0.24, s * 0.28, s * 0.48, s * 0.14); ctx.strokeStyle = INK; ctx.lineWidth = s * 0.07; ctx.strokeRect(-s * 0.24, s * 0.28, s * 0.48, s * 0.14); break;
+    case "sound": case "mute": ctx.beginPath(); ctx.moveTo(-s * 0.4, -s * 0.14); ctx.lineTo(-s * 0.2, -s * 0.14); ctx.lineTo(s * 0.06, -s * 0.38); ctx.lineTo(s * 0.06, s * 0.38); ctx.lineTo(-s * 0.2, s * 0.14); ctx.lineTo(-s * 0.4, s * 0.14); ctx.closePath();
+      ctx.fillStyle = color; ctx.fill(); st(s * 0.06, INK);
+      if (name === "sound") { ctx.beginPath(); ctx.arc(s * 0.08, 0, s * 0.22, -0.8, 0.8); st(s * 0.08); ctx.beginPath(); ctx.arc(s * 0.08, 0, s * 0.38, -0.8, 0.8); st(s * 0.08); }
+      else { ctx.beginPath(); ctx.moveTo(s * 0.18, -s * 0.16); ctx.lineTo(s * 0.44, s * 0.16); ctx.moveTo(s * 0.44, -s * 0.16); ctx.lineTo(s * 0.18, s * 0.16); st(s * 0.1, "#ff5a4a"); } break;
+    case "home": ctx.beginPath(); ctx.moveTo(-s * 0.4, -s * 0.02); ctx.lineTo(0, -s * 0.4); ctx.lineTo(s * 0.4, -s * 0.02); ctx.lineTo(s * 0.28, -s * 0.02); ctx.lineTo(s * 0.28, s * 0.38); ctx.lineTo(-s * 0.28, s * 0.38); ctx.lineTo(-s * 0.28, -s * 0.02); ctx.closePath();
+      ctx.fillStyle = color; ctx.fill(); st(s * 0.07, INK); ctx.fillStyle = "#5a4030"; ctx.fillRect(-s * 0.08, s * 0.1, s * 0.16, s * 0.28); break;
+    case "shop": ctx.beginPath(); ctx.moveTo(-s * 0.36, -s * 0.12); ctx.lineTo(s * 0.36, -s * 0.12); ctx.lineTo(s * 0.28, s * 0.42); ctx.lineTo(-s * 0.28, s * 0.42); ctx.closePath(); ctx.fillStyle = "#c8843a"; ctx.fill(); st(s * 0.08, INK);
+      ctx.beginPath(); ctx.arc(0, -s * 0.12, s * 0.2, Math.PI, 0); st(s * 0.08, INK); drawCoin(0, s * 0.14, s * 0.14); break;
+    case "up": case "down": ctx.rotate(name === "up" ? 0 : Math.PI); ctx.beginPath(); ctx.moveTo(-s * 0.3, s * 0.14); ctx.lineTo(0, -s * 0.18); ctx.lineTo(s * 0.3, s * 0.14); st(s * 0.22, INK); st(s * 0.12, color); break;
+    case "close": ctx.beginPath(); ctx.moveTo(-s * 0.25, -s * 0.25); ctx.lineTo(s * 0.25, s * 0.25); ctx.moveTo(s * 0.25, -s * 0.25); ctx.lineTo(-s * 0.25, s * 0.25); st(s * 0.2, INK); st(s * 0.1, color); break;
+    case "lock": ctx.beginPath(); ctx.arc(0, -s * 0.12, s * 0.2, Math.PI, 0); st(s * 0.1, color); ctx.fillStyle = color; ctx.fillRect(-s * 0.3, -s * 0.12, s * 0.6, s * 0.46); break;
+    case "police": drawHead("police", 0, s * 0.08, s * 0.32, 1, 0); break;
+    case "rush": drawCoin(0, 0, s * 0.4); for (let i = 0; i < 3; i++) star(Math.cos(i * 2.1) * s * 0.48, Math.sin(i * 2.1) * s * 0.48, s * 0.14, "#fff"); break;
+    case "cavein": ctx.fillStyle = "#6a6a6a"; for (const [a, b, r] of [[-0.2, -0.2, 0.2], [0.2, 0.05, 0.16], [-0.1, 0.25, 0.14]]) { ctx.beginPath(); ctx.arc(a * s, b * s, r * s, 0, TAU); ctx.fill(); st(s * 0.06, INK); } break;
+    case "vein": drawMineralIcon(0, 0, s * 0.5); break;
+  }
+  ctx.restore();
+}
+function drawMineralIcon(x, y, s) { drawMineral(MINERALS[9], x, y, s); }
+
+// =====================================================================
+// 4. THE CAVE — a layered background. Far layers move less than near
+//    ones when you move the mouse (that's "parallax": it fakes depth).
+// =====================================================================
+const CAVE_PAL = [
+  { top: "#1b1816", bot: "#2e2925", far: "#4a443e", mid: "#36302b", floor: "#2b2724", stripe: "#211d1a", near: "#0e0c0b", fog: "rgba(120,110,100,0.06)", amb: "rgba(255,190,120,0.10)" },
+  { top: "#0d131c", bot: "#18212d", far: "#2c3a4e", mid: "#212c3a", floor: "#19212b", stripe: "#121820", near: "#06090d", fog: "rgba(120,170,230,0.08)", amb: "rgba(140,200,255,0.10)" },
+  { top: "#1c0b06", bot: "#2e130a", far: "#4a2416", mid: "#36190f", floor: "#22100a", stripe: "#170a06", near: "#0b0402", fog: "rgba(255,120,40,0.07)", amb: "rgba(255,110,30,0.16)" },
+  { top: "#08060f", bot: "#140e22", far: "#2a1f40", mid: "#1d1530", floor: "#150f22", stripe: "#0d0916", near: "#040208", fog: "rgba(170,110,255,0.07)", amb: "rgba(180,100,255,0.12)" },
+  { top: "#2a0d03", bot: "#4a1a05", far: "#6a2a10", mid: "#4a1e0a", floor: "#2a1206", stripe: "#1c0b04", near: "#0e0502", fog: "rgba(255,160,60,0.10)", amb: "rgba(255,150,50,0.22)" },
+];
+let caveCache = null;
+function buildCave(L, W, H, ground) {
+  const r = seeded(1000 + L * 77);
+  const c = { key: L + "_" + Math.round(W) + "_" + Math.round(H), blobs: [], crystals: [], stal: [], mites: [], near: [], stars: [], bumps: [] };
+  // far wall: overlapping round rocks, like his backdrop
+  for (let row = 0; row < 4; row++)
+    for (let x = -200; x < W + 200; x += 70 + r() * 70)
+      c.blobs.push({ x, y: H * (0.12 + row * 0.2) + (r() - 0.5) * 80, r: 60 + r() * 110, f: (r() - 0.5) * 0.12 });
+  const list = LAYER_MINERALS[Math.min(L, 3)];
+  for (let i = 0; i < 16; i++) c.crystals.push({ x: r() * (W + 200) - 100, y: H * 0.16 + r() * (ground - H * 0.3), s: 8 + r() * 10, m: list[1 + Math.floor(r() * Math.min(list.length - 1, 6))], ph: r() * TAU });
+  for (let x = -150; x < W + 150; x += 40 + r() * 60) c.stal.push({ x, w: 26 + r() * 50, l: 40 + r() * 130, k: r() });
+  for (let x = -150; x < W + 150; x += 90 + r() * 120) c.mites.push({ x, w: 30 + r() * 50, l: 20 + r() * 60 });
+  for (let x = -100; x <= W + 100; x += 40) c.bumps.push([x, (r() - 0.5) * 10]);
+  c.near.push({ x: -40, y: H + 30, r: 170 + r() * 60 }, { x: W + 50, y: H + 20, r: 160 + r() * 60 }, { x: W * 0.12, y: -60, r: 110 }, { x: W * 0.9, y: -50, r: 130 });
+  for (let i = 0; i < 90; i++) c.stars.push({ x: r() * W, y: r() * ground, s: r() * 1.8 + 0.4, ph: r() * TAU });
+  return c;
+}
+function drawCave(L, t, px, py, lay, veinGlow) {
+  const { W, H, ground } = lay;
+  const pal = CAVE_PAL[L];
+  if (!caveCache || caveCache.key !== L + "_" + Math.round(W) + "_" + Math.round(H)) caveCache = buildCave(L, W, H, ground);
+  const c = caveCache;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, pal.top); g.addColorStop(1, pal.bot);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  if (L === 3) for (const s of c.stars) { ctx.fillStyle = `rgba(220,200,255,${0.4 + 0.4 * Math.sin(t * 2 + s.ph)})`; ctx.fillRect(s.x + px * 0.05, s.y + py * 0.05, s.s, s.s); }
+  // far blobs
+  ctx.save(); ctx.translate(px * 0.15, py * 0.1);
+  for (const b of c.blobs) {
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.fillStyle = shade(pal.far, b.f < 0 ? b.f : 0, 1); if (b.f > 0) ctx.fillStyle = shade(pal.far, b.f * 0.5);
+    ctx.fill();
+  }
+  ctx.restore();
+  // fog between the far wall and the rest
+  ctx.fillStyle = pal.fog; ctx.fillRect(0, 0, W, H);
+  // glowing crystals stuck in the wall
+  ctx.save(); ctx.translate(px * 0.3, py * 0.2);
+  for (const k of c.crystals) {
+    const tw = 0.6 + 0.4 * Math.sin(t * 1.5 + k.ph);
+    glow(k.x, k.y, k.s * (3 + veinGlow * 3), rarityGlowColor(k.m.rarity, t), (0.25 + veinGlow * 0.5) * tw);
+    drawMineral(k.m, k.x, k.y, k.s, { t });
+  }
+  ctx.restore();
+  // ceiling stalactites
+  ctx.save(); ctx.translate(px * 0.5, py * 0.3);
+  const top = lay.hud - 30;
+  ctx.fillStyle = pal.mid; ctx.fillRect(-200, -100, W + 400, top + 100);
+  for (const s of c.stal) {
+    ctx.beginPath(); ctx.moveTo(s.x - s.w / 2, top); ctx.quadraticCurveTo(s.x - s.w * 0.2, top + s.l * 0.6, s.x, top + s.l); ctx.quadraticCurveTo(s.x + s.w * 0.2, top + s.l * 0.6, s.x + s.w / 2, top); ctx.closePath();
+    ctx.fillStyle = pal.mid; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = shade(pal.mid, -0.4); ctx.stroke();
+    if (L === 1 && s.k > 0.6) { const ph = (t * 0.4 + s.k * 7) % 1; ctx.fillStyle = "rgba(160,210,255,0.8)"; ctx.beginPath(); ctx.arc(s.x, top + s.l + ph * (ground - top - s.l), 2.2, 0, TAU); ctx.fill(); }
+  }
+  ctx.restore();
+  // floor
+  ctx.save(); ctx.translate(px * 0.7, 0);
+  ctx.beginPath(); ctx.moveTo(-200, H + 10);
+  for (const b of c.bumps) ctx.lineTo(b[0], ground + b[1]);
+  ctx.lineTo(W + 200, H + 10); ctx.closePath();
+  const fg = ctx.createLinearGradient(0, ground, 0, H); fg.addColorStop(0, shade(pal.floor, 0.12)); fg.addColorStop(1, pal.stripe);
+  ctx.fillStyle = fg; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  // his dark floor stripes
+  ctx.strokeStyle = pal.stripe; ctx.lineCap = "round"; ctx.lineWidth = 9;
+  for (let i = 0; i < 9; i++) { const y = ground + 24 + (i % 3) * 20, x = ((i * 173) % (W + 100)) - 50; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 70 + (i * 37) % 90, y); ctx.stroke(); }
+  for (const m of c.mites) { ctx.beginPath(); ctx.moveTo(m.x - m.w / 2, ground + 6); ctx.lineTo(m.x, ground - m.l); ctx.lineTo(m.x + m.w / 2, ground + 6); ctx.closePath(); ctx.fillStyle = pal.mid; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke(); }
+  ctx.restore();
+  // layer specials
+  if (L === 2 || L === 4) {   // lava
+    const ly = H - 26;
+    ctx.beginPath(); ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 20) ctx.lineTo(x, ly + Math.sin(x * 0.02 + t * 2) * 5 + Math.sin(x * 0.05 - t * 3) * 3);
+    ctx.lineTo(W, H); ctx.closePath();
+    const lg = ctx.createLinearGradient(0, ly - 8, 0, H); lg.addColorStop(0, "#ffd04a"); lg.addColorStop(0.4, "#ff6a00"); lg.addColorStop(1, "#8a1800");
+    ctx.fillStyle = lg; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+    glow(W / 2, H, W * 0.6, "rgba(255,110,20,0.5)", 0.7 + Math.sin(t * 1.7) * 0.1);
+  }
+}
+function drawNear(L, px, py, lay) {
+  const c = caveCache; if (!c) return;
+  ctx.save(); ctx.translate(px * 1.3, py * 0.6);
+  ctx.fillStyle = CAVE_PAL[L].near;
+  for (const n of c.near) { ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+// darkness everywhere except around the miner's lamp
+function drawLighting(L, lamp, t, lay, rush) {
+  const { W, H } = lay;
+  const flick = 1 + Math.sin(t * 13) * 0.015 + Math.sin(t * 7.3) * 0.02;
+  const R = Math.max(W, H) * 0.85 * flick;
+  const g = ctx.createRadialGradient(lamp[0], lamp[1], 0, lamp[0], lamp[1], R);
+  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(0.3, "rgba(0,0,0,0.1)"); g.addColorStop(0.7, "rgba(0,0,0,0.55)"); g.addColorStop(1, "rgba(0,0,0,0.85)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  glow(lamp[0], lamp[1], 380 * flick, CAVE_PAL[L].amb, 1);
+  glow(lamp[0], lamp[1], 140 * flick, "rgba(255,230,170,0.22)", 1);
+  if (rush > 0) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = `rgba(255,190,40,${0.10 * rush + Math.sin(t * 6) * 0.03 * rush})`; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+}
+
+// ---------- particles ----------
+const parts = [];
+const motes = [];
+function addPart(p) { if (parts.length < 600) parts.push(p); }
+function burstChips(x, y, n, pal, power = 1) {
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6;
+    const sp = (3 + Math.random() * 6) * power;
+    addPart({ k: "chip", x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 3 + Math.random() * 6 * power, rot: Math.random() * TAU, vr: (Math.random() - 0.5) * 0.5, c: Math.random() < 0.5 ? pal.body : pal.light, life: 0, max: 40 + Math.random() * 30 });
+  }
+  for (let i = 0; i < n / 2; i++) addPart({ k: "dust", x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 20, vx: (Math.random() - 0.5) * 1.5, vy: -Math.random() * 1.2, r: 8 + Math.random() * 12, life: 0, max: 30 + Math.random() * 20, c: "rgba(180,170,160," });
+}
+function burstSparks(x, y, n, color, speed = 6) {
+  for (let i = 0; i < n; i++) { const a = Math.random() * TAU, s = speed * (0.4 + Math.random()); addPart({ k: "spark", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0, max: 18 + Math.random() * 18, c: color }); }
+}
+function floatText(x, y, text, color, size = 20) { addPart({ k: "text", x, y, vy: -1.6, text, c: color, size, life: 0, max: 50 }); }
+function updateParts(ground) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]; p.life++;
+    if (p.k === "chip") { p.vy += 0.45; p.x += p.vx; p.y += p.vy; p.rot += p.vr; if (p.y > ground - 2 && p.vy > 0) { p.y = ground - 2; p.vy *= -0.35; p.vx *= 0.6; p.vr *= 0.6; } }
+    else if (p.k === "dust") { p.x += p.vx; p.y += p.vy; p.r += 0.5; }
+    else if (p.k === "spark") { p.vy += 0.18; p.vx *= 0.96; p.x += p.vx; p.y += p.vy; }
+    else if (p.k === "ember") { p.x += p.vx + Math.sin(p.life * 0.1) * 0.3; p.y += p.vy; }
+    else if (p.k === "text") { p.y += p.vy; p.vy *= 0.97; }
+    else if (p.k === "confetti") { p.vy += 0.12; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.rot += p.vr; }
+    if (p.life >= p.max) parts.splice(i, 1);
+  }
+}
+function drawParts() {
+  for (const p of parts) {
+    const f = 1 - p.life / p.max;
+    if (p.k === "chip") {
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.globalAlpha = Math.min(1, f * 3);
+      ctx.beginPath(); ctx.moveTo(-p.r, -p.r * 0.6); ctx.lineTo(p.r * 0.8, -p.r * 0.8); ctx.lineTo(p.r, p.r * 0.5); ctx.lineTo(-p.r * 0.5, p.r * 0.8); ctx.closePath();
+      ctx.fillStyle = p.c; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = INK; ctx.stroke(); ctx.restore();
+    } else if (p.k === "dust") {
+      ctx.fillStyle = p.c + (0.25 * f) + ")"; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+    } else if (p.k === "spark" || p.k === "ember") {
+      ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = f; ctx.strokeStyle = p.c; ctx.lineWidth = p.k === "ember" ? 3 : 2.5; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 2, p.y - p.vy * 2 - (p.k === "ember" ? 2 : 0)); ctx.stroke(); ctx.restore();
+    } else if (p.k === "text") {
+      ctx.save(); ctx.globalAlpha = Math.min(1, f * 2.5); label(p.text, p.x, p.y, p.size, p.c, "center"); ctx.restore();
+    } else if (p.k === "confetti") {
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.globalAlpha = Math.min(1, f * 3); ctx.fillStyle = p.c; ctx.fillRect(-5, -3, 10, 6); ctx.restore();
+    }
+  }
+}
+function updateMotes(lay, L) {
+  while (motes.length < 55) motes.push({ x: Math.random() * lay.W, y: lay.hud + Math.random() * (lay.ground - lay.hud), vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.2, s: 1 + Math.random() * 2, ph: Math.random() * TAU });
+  for (const m of motes) {
+    m.x += m.vx + Math.sin(m.ph += 0.01) * 0.15; m.y += m.vy + (L === 2 || L === 4 ? -0.5 : 0);
+    if (m.x < -10) m.x = lay.W + 10; if (m.x > lay.W + 10) m.x = -10;
+    if (m.y < lay.hud - 20) m.y = lay.ground; if (m.y > lay.ground + 20) m.y = lay.hud;
+  }
+}
+function drawMotes(lamp, L) {
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  const col = L === 2 || L === 4 ? [255, 150, 60] : L === 3 ? [200, 150, 255] : L === 1 ? [170, 210, 255] : [255, 230, 190];
+  for (const m of motes) {
+    const d = Math.hypot(m.x - lamp[0], m.y - lamp[1]), a = clamp(1 - d / 600, 0.08, 1) * (0.5 + 0.5 * Math.sin(m.ph * 3));
+    ctx.fillStyle = rgb(col, a * 0.8); ctx.beginPath(); ctx.arc(m.x, m.y, m.s, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// =====================================================================
+// 5. SOUND — his recorded sounds + music and effects made live with the
+//    Web Audio API (code that builds sounds from oscillators, like a synth).
+// =====================================================================
+const SOUND_FILES = {
   pickaxe: "rock_pickaxe-blow-333695.wav",          // by CreatorsHome
   rockBreak: "rock_small-rock-break-194553-1.wav",  // by LordSonny (Pixabay)
   shine: "minerals_shine-7-268909.wav",
-  pop: "pop.wav",
+  punch: "rock_punch-a-rock-161647.wav",
+  cobble: "rock_two-large-cobblestone-blocks-35760.wav",
+  hitRock: "rock_hit-rock-03-266305.mp3",
 };
-const audio = {};
-for (const k in SOUNDS) { const a = new Audio("assets/" + SOUNDS[k]); a.preload = "auto"; audio[k] = a; }
-audio.shine.volume = 0.6;
-let muted = false;
-function play(name) {
-  if (muted) return;
-  const a = audio[name];
-  try { a.currentTime = 0; const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+const settings = { music: 0.55, sfx: 0.8, muted: false, shake: true };
+const his = {};
+for (const k in SOUND_FILES) { try { const a = new Audio("assets/" + SOUND_FILES[k]); a.preload = "auto"; his[k] = a; } catch (e) {} }
+function playHis(name, vol = 1) {
+  const a = his[name]; if (!a || settings.muted) return;
+  try { a.volume = clamp(settings.sfx * vol, 0, 1); a.currentTime = 0; const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
 }
-function stopAllSounds() { for (const k in audio) { try { audio[k].pause(); } catch (e) {} } }
+function stopHis() { for (const k in his) { try { his[k].pause(); } catch (e) {} } }
+
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    const c = A.ctx = new AC();
+    A.master = c.createDynamicsCompressor(); A.master.connect(c.destination);
+    A.music = c.createGain(); A.music.connect(A.master);
+    A.sfx = c.createGain(); A.sfx.connect(A.master);
+    // a simple echo = the "cave reverb"
+    A.echo = c.createDelay(1); A.echo.delayTime.value = 0.32;
+    A.fb = c.createGain(); A.fb.gain.value = 0.38;
+    A.echoF = c.createBiquadFilter(); A.echoF.type = "lowpass"; A.echoF.frequency.value = 2200;
+    A.echo.connect(A.echoF); A.echoF.connect(A.fb); A.fb.connect(A.echo); A.echoF.connect(A.master);
+    A.echoSend = c.createGain(); A.echoSend.gain.value = 0.5; A.echoSend.connect(A.echo);
+    const len = c.sampleRate; A.noise = c.createBuffer(1, len, c.sampleRate);
+    const d = A.noise.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    applyVolumes();
+    music.next = c.currentTime + 0.1;
+  } catch (e) { A.ctx = null; }
+}
+function applyVolumes() {
+  if (!A.ctx) return;
+  const m = settings.muted ? 0 : settings.music * 0.6, s = settings.muted ? 0 : settings.sfx;
+  A.music.gain.setTargetAtTime(m, A.ctx.currentTime, 0.05);
+  A.sfx.gain.setTargetAtTime(s, A.ctx.currentTime, 0.05);
+}
+const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+// one note: an oscillator with a volume envelope (quick fade in, slow fade out)
+function tone(f, t, dur, o = {}) {
+  const c = A.ctx; if (!c) return;
+  const osc = c.createOscillator(), g = c.createGain();
+  osc.type = o.type || "sine"; osc.frequency.setValueAtTime(f, t);
+  if (o.slide) osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.slide), t + dur);
+  if (o.detune) osc.detune.value = o.detune;
+  const v = o.gain || 0.2, at = o.attack || 0.005;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + at); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let node = osc;
+  if (o.lp) { const fl = c.createBiquadFilter(); fl.type = "lowpass"; fl.frequency.value = o.lp; osc.connect(fl); node = fl; }
+  node.connect(g); g.connect(o.dest || A.sfx);
+  if (o.echo) { const e = c.createGain(); e.gain.value = o.echo; g.connect(e); e.connect(A.echoSend); }
+  osc.start(t); osc.stop(t + dur + 0.05);
+}
+function noise(t, dur, o = {}) {
+  const c = A.ctx; if (!c) return;
+  const src = c.createBufferSource(); src.buffer = A.noise; src.loop = true;
+  const f = c.createBiquadFilter(); f.type = o.ft || "lowpass"; f.frequency.value = o.f || 1000; f.Q.value = o.q || 0.7;
+  const g = c.createGain(), v = o.gain || 0.2;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + (o.attack || 0.005)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(o.dest || A.sfx);
+  src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
+}
+const SFX = {
+  click() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(700, t, 0.06, { type: "triangle", gain: 0.12, slide: 1000 }); },
+  buy() { if (!A.ctx) return; const t = A.ctx.currentTime; [72, 76, 79, 84].forEach((n, i) => tone(midi(n), t + i * 0.05, 0.25, { type: "triangle", gain: 0.13, echo: 0.3 })); noise(t, 0.2, { ft: "highpass", f: 6000, gain: 0.05 }); },
+  deny() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(150, t, 0.16, { type: "square", gain: 0.07, lp: 900 }); tone(110, t + 0.08, 0.16, { type: "square", gain: 0.07, lp: 900 }); },
+  find(tier) {
+    if (!A.ctx || tier < 2) return; const t = A.ctx.currentTime;
+    const sc = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28];
+    const n = Math.min(3 + tier, 12);
+    for (let i = 0; i < n; i++) { const f = midi(76 + sc[i]); tone(f, t + i * 0.055, 0.7, { gain: 0.07, echo: 0.6 }); tone(f * 2.76, t + i * 0.055, 0.3, { gain: 0.015 }); }
+    if (tier >= 5) { tone(55, t, 1.2, { type: "sine", gain: 0.25, slide: 40 }); noise(t, 1.0, { ft: "bandpass", f: 3000, q: 0.5, gain: 0.04, attack: 0.3 }); }
+  },
+  levelUp() { if (!A.ctx) return; const t = A.ctx.currentTime; [[60, 0], [64, 0.1], [67, 0.2], [72, 0.32], [76, 0.32], [79, 0.32]].forEach(([n, d]) => { tone(midi(n), t + d, 0.6, { type: "square", gain: 0.05, lp: 2400, echo: 0.4 }); tone(midi(n), t + d, 0.6, { type: "triangle", gain: 0.08 }); }); },
+  alarm() { if (!A.ctx) return; const t = A.ctx.currentTime; for (let i = 0; i < 3; i++) { tone(880, t + i * 0.22, 0.1, { type: "square", gain: 0.05, lp: 3000 }); tone(660, t + i * 0.22 + 0.11, 0.1, { type: "square", gain: 0.05, lp: 3000 }); } },
+  whistle() { if (!A.ctx) return; const t = A.ctx.currentTime; for (let i = 0; i < 2; i++) { tone(2300, t + i * 0.2, 0.14, { type: "sine", gain: 0.08 }); tone(2450, t + i * 0.2, 0.14, { type: "sine", gain: 0.05 }); } },
+  rumble() { if (!A.ctx) return; const t = A.ctx.currentTime; noise(t, 2.2, { f: 160, gain: 0.5, attack: 0.2 }); tone(45, t, 2, { gain: 0.25, slide: 30 }); },
+  boom() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(90, t, 0.5, { gain: 0.4, slide: 30 }); noise(t, 0.6, { f: 600, gain: 0.3 }); },
+  coin() { if (!A.ctx) return; const t = A.ctx.currentTime; tone(midi(88), t, 0.12, { type: "square", gain: 0.03, lp: 5000 }); tone(midi(95), t + 0.05, 0.2, { type: "square", gain: 0.03, lp: 5000 }); },
+};
+
+// ---------- music: a looping cave song, a different key per layer ----------
+// Every "step" is an eighth note. Each chord lasts one bar (8 steps).
+const SONGS = [
+  { bpm: 96,  chords: [[57, 60, 64], [53, 57, 60], [55, 60, 64], [55, 59, 62]], kick: [0, 4] },  // Am F C G
+  { bpm: 88,  chords: [[50, 53, 57], [46, 50, 53], [48, 53, 57], [48, 52, 55]], kick: [0, 4] },  // Dm Bb F C
+  { bpm: 112, chords: [[52, 55, 59], [48, 52, 55], [50, 54, 57], [47, 51, 54]], kick: [0, 2, 4, 6] }, // Em C D B
+  { bpm: 84,  chords: [[48, 51, 55], [44, 48, 51], [46, 51, 55], [46, 50, 53]], kick: [0, 5] },  // Cm Ab Eb Bb
+  { bpm: 124, chords: [[52, 55, 59], [48, 52, 55], [50, 54, 57], [47, 51, 54]], kick: [0, 2, 4, 6] },
+];
+const ARP = [0, 1, 2, 1, 3, 2, 1, 2];
+const LEAD = [[0, 7], [2, 9], [3, 7], [5, 12], [6, 9]];  // [step, interval above root]
+const music = { next: 0, step: 0, layer: 0, rush: false, on: true };
+function musicTick() {
+  const c = A.ctx; if (!c || !music.on) return;
+  if (music.next < c.currentTime - 0.3) music.next = c.currentTime + 0.05;
+  const song = SONGS[music.layer];
+  const stepDur = 60 / (song.bpm + (music.rush ? 14 : 0)) / 2;
+  while (music.next < c.currentTime + 0.2) {
+    const t = music.next, s = music.step % 8, bar = Math.floor(music.step / 8) % 4, ch = song.chords[bar];
+    const D = A.music;
+    if (s === 0) for (const n of ch) { tone(midi(n), t, stepDur * 8.5, { type: "sawtooth", gain: 0.022, attack: 0.5, lp: 800, dest: D, detune: -8 }); tone(midi(n), t, stepDur * 8.5, { type: "sawtooth", gain: 0.022, attack: 0.5, lp: 800, dest: D, detune: 8 }); }
+    const a = ARP[s], an = ch[a % 3] + 12 + (a >= 3 ? 12 : 0);
+    tone(midi(an), t, stepDur * 1.6, { type: "triangle", gain: 0.06, dest: D, echo: 0.35 });
+    if (s === 0 || s === 3 || s === 4) tone(midi(ch[0] - 12), t, stepDur * (s === 3 ? 1 : 2.2), { type: "triangle", gain: 0.16, lp: 600, dest: D });
+    if (s === 7) tone(midi(ch[0] - 5), t, stepDur, { type: "triangle", gain: 0.12, lp: 600, dest: D });
+    if (song.kick.includes(s)) tone(120, t, 0.25, { gain: 0.3, slide: 40, dest: D });
+    if (s % 2 === 1) noise(t, 0.05, { ft: "highpass", f: 7000, gain: 0.025, dest: D });
+    if (s === 4 && bar % 2 === 1) noise(t, 0.18, { ft: "bandpass", f: 1800, gain: 0.05, dest: D });
+    if (music.rush) for (const [ls, iv] of LEAD) if (ls === s) tone(midi(ch[0] + 24 + iv), t, stepDur * 1.8, { type: "square", gain: 0.03, lp: 3000, dest: D, echo: 0.3 });
+    if (Math.random() < 0.06) { const f = 1400 + Math.random() * 1400; tone(f, t, 0.12, { gain: 0.04, slide: f * 0.5, dest: D, echo: 0.8 }); }   // water drip
+    music.next += stepDur; music.step++;
+  }
+}
 
 // =====================================================================
-// 3. GAME
+// 6. SAVING (localStorage = a small storage box inside the browser)
 // =====================================================================
-const canvas = document.getElementById("c");
-const ctx = canvas.getContext("2d");
-let view = 1;   // screen pixels per stage pixel
-
-// Fit the 480x360 stage into the window, keeping 4:3, sharp on hi-DPI.
-function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  const s = Math.min(window.innerWidth / 480, window.innerHeight / 360);
-  canvas.style.width = Math.floor(480 * s) + "px";
-  canvas.style.height = Math.floor(360 * s) + "px";
-  canvas.width = Math.floor(480 * s * dpr);
-  canvas.height = Math.floor(360 * s * dpr);
-  view = canvas.width / 480;
-}
-window.addEventListener("resize", resize);
-resize();
-
-// ---------- saving (localStorage = a little storage box in the browser) ----------
-const SAVE_KEY = "your-average-mining-game-v1";
+const SAVE_KEY = "your-average-mining-game-v1";     // same key as v1, so old saves load
+const SET_KEY = "your-average-mining-game-settings";
 function loadSave() {
   const s = newSave();
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const d = JSON.parse(raw);
-      for (const k of ["gold", "high", "mult", "speed", "drill", "rocks"]) if (typeof d[k] === "number" && isFinite(d[k])) s[k] = d[k];
+      for (const k of ["gold", "high", "mult", "speed", "drill", "pick", "luck", "layer", "maxLayer", "coreHP", "rebirths", "rocks", "quotas", "time", "totalGold", "boulders"])
+        if (typeof d[k] === "number" && isFinite(d[k])) s[k] = d[k];
+      for (const k of ["police", "coreBroken", "ended"]) s[k] = !!d[k];
+      // v1 saves had 17 minerals = exactly the first 17 here
       if (Array.isArray(d.found)) d.found.forEach((n, i) => { if (i < s.found.length && typeof n === "number") s.found[i] = n; });
-      s.police = !!d.police;
-      s.mult = Math.min(s.mult, UPG_MULT.length); s.speed = Math.min(s.speed, UPG_SPEED.length); s.drill = Math.min(s.drill, UPG_DRILL.length);
-      if (typeof d.muted === "boolean") muted = d.muted;
+      if (d.ach && typeof d.ach === "object") for (const k in d.ach) s.ach[k] = !!d.ach[k];
+      if (typeof d.muted === "boolean") settings.muted = d.muted;   // v1 kept mute in the save
+      if (!d.v) s.totalGold = Math.max(s.totalGold, s.high);
+      for (const k in UPG) s[k] = clamp(Math.floor(s[k]), 0, UPG[k].length);
+      s.maxLayer = clamp(Math.floor(s.maxLayer), 0, LAYERS.length - 1);
+      s.layer = clamp(Math.floor(s.layer), 0, s.maxLayer);
+      if (s.coreHP <= 0 && !s.coreBroken) s.coreHP = CORE_HP;
+      s.v = 2;
     }
   } catch (e) {}
   return s;
 }
-function save() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(Object.assign({}, S, { muted }))); } catch (e) {}
-}
+function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
+function loadSettings() { try { const d = JSON.parse(localStorage.getItem(SET_KEY) || "{}"); for (const k in settings) if (typeof d[k] === typeof settings[k]) settings[k] = d[k]; } catch (e) {} }
+function saveSettings() { try { localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch (e) {} }
+loadSettings();
 let S = loadSave();
-function hasProgress() { return S.rocks > 0 || S.gold > 0; }
+const hasProgress = () => S.rocks > 0 || S.gold > 0;
+
+// =====================================================================
+// 7. SCREEN + LAYOUT. The game world is always 720 units tall; the width
+//    grows with the window, so it fills any screen.
+// =====================================================================
+const canvas = document.getElementById("c");
+ctx = canvas.getContext("2d");
+let W = 1280, H = 720, scale = 1, dpr = 1;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const vw = window.innerWidth, vh = window.innerHeight;
+  scale = Math.min(vh / 720, vw / 1000);
+  W = vw / scale; H = vh / scale;
+  canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
+  canvas.style.width = vw + "px"; canvas.style.height = vh + "px";
+}
+window.addEventListener("resize", resize);
+resize();
+
+const ui = { shopA: 0, shop: false, modal: null, idxLayer: 0, idxPick: 0, toasts: [], banner: null, dialog: null, flash: null, fade: 1, fadeTo: 0, trans: null, layerCard: 0, drag: null, sliders: {}, confirm: null, resetArmed: 0 };
+const lay = {};
+function computeLayout() {
+  lay.W = W; lay.H = H; lay.hud = 86; lay.ground = H - 104;
+  lay.shopW = Math.min(360, W * 0.36);
+  lay.sceneL = easeOut(ui.shopA) * (lay.shopW + 20);
+  const free = W - lay.sceneL;
+  lay.cx = lay.sceneL + free / 2;
+  lay.rockR = clamp(Math.min(free * 0.1, H * 0.13), 64, 112);
+  lay.s = lay.rockR / 95;
+  const core = LAYERS[S.layer].core;
+  lay.R = core ? lay.rockR * 1.5 : lay.rockR;
+  lay.rockX = lay.cx + 40 * lay.s;
+  lay.rockY = core ? lay.ground - lay.R * 1.25 : lay.ground - lay.R * 0.93;
+  lay.minerX = lay.rockX - lay.R - 92 * lay.s;
+  lay.lamp = [lay.minerX + 18 * lay.s, lay.ground - 148 * lay.s];
+  lay.drillX = lay.rockX + lay.R + 28 * lay.s;
+  lay.policeX = lay.rockX + lay.R + (S.drill > 0 ? 150 : 90) * lay.s;
+}
 
 // ---------- input ----------
-const mouse = { x: 0, y: 0, down: false };   // stage coordinates
-function toStage(e) {
-  const r = canvas.getBoundingClientRect();
-  mouse.x = (e.clientX - r.left) / r.width * 480 - 240;
-  mouse.y = 180 - (e.clientY - r.top) / r.height * 360;
-}
-canvas.addEventListener("pointerdown", e => { toStage(e); mouse.down = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {} onPress(); e.preventDefault(); });
-canvas.addEventListener("pointermove", e => toStage(e));
-window.addEventListener("pointerup", () => { mouse.down = false; });
+const mouse = { x: 0, y: 0, down: false, ui: false };
+let spaceDown = false;
+let regions = [], hoverId = null;   // clickable areas, rebuilt every frame
+function reg(id, x, y, w, h, fn) { regions.push({ id, x, y, w, h, fn }); }
+function regionAt(x, y) { for (let i = regions.length - 1; i >= 0; i--) { const r = regions[i]; if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r; } return null; }
+const anims = {};
+function anim(id, target, rate = 0.25) { const v = anims[id] === undefined ? target : anims[id]; return (anims[id] = v + (target - v) * rate); }
+function setMouse(e) { mouse.x = e.clientX / scale; mouse.y = e.clientY / scale; }
+canvas.addEventListener("pointerdown", e => {
+  setMouse(e); mouse.down = true; initAudio();
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  const r = regionAt(mouse.x, mouse.y);
+  mouse.ui = !!r;
+  if (r && r.fn) r.fn();
+  else if (!r && screen === "game") scenePress();
+  e.preventDefault();
+});
+canvas.addEventListener("pointermove", e => { setMouse(e); if (ui.drag) dragSlider(); });
+window.addEventListener("pointerup", () => { mouse.down = false; mouse.ui = false; if (ui.drag) { ui.drag = null; saveSettings(); } });
 window.addEventListener("pointercancel", () => { mouse.down = false; });
-window.addEventListener("blur", () => { mouse.down = false; save(); });
+window.addEventListener("blur", () => { mouse.down = false; spaceDown = false; save(); });
 window.addEventListener("beforeunload", save);
 window.addEventListener("keydown", e => {
-  if (e.key === "m" || e.key === "M") { muted = !muted; if (muted) stopAllSounds(); save(); }
-  if (e.key === "Escape" && screen === "game") { if (ui.index) ui.index = false; else { save(); screen = "title"; } }
+  initAudio();
+  if (e.code === "Space") { spaceDown = true; e.preventDefault(); }
+  if (e.key === "m" || e.key === "M") toggleMute();
+  if (screen !== "game") return;
+  if (e.key === "Escape") { if (ui.modal) closeModal(); else if (ui.shop) ui.shop = false; else goTitle(); }
+  if (e.key === "s" || e.key === "S") ui.shop = !ui.shop;
+  if (e.key === "i" || e.key === "I") openModal(ui.modal === "index" ? null : "index");
 });
+window.addEventListener("keyup", e => { if (e.code === "Space") spaceDown = false; });
+function toggleMute() { settings.muted = !settings.muted; if (settings.muted) stopHis(); applyVolumes(); saveSettings(); }
 
-// ---------- buttons ----------
-// Like his buttons: they shrink a little when the mouse is on them
-// ("change size by (target - size) / 4" every frame = smooth easing).
-function makeButton(x, y, normal, hover) {
-  return { x, y, size: normal, normal, hover, flash: 0, shake: 0 };
-}
-const btn = {
-  shop: makeButton(-205, -160, 300, 250),
-  high: makeButton(190, -160, 300, 250),
-  index: makeButton(190, -127, 300, 250),
-  mult: makeButton(-187, 95, 350, 300),
-  speed: makeButton(-187, 55, 350, 300),
-  drill: makeButton(-187, 15, 350, 300),
-};
-function overButton(b, c) {
-  const k = b.size / 100;
-  const l = b.x - c.cx * k, t = b.y + c.cy * k;
-  return mouse.x >= l && mouse.x <= l + c.w * k && mouse.y <= t && mouse.y >= t - c.h * k;
-}
-function shopCostume(kind) { return C[kind][S[kind]]; }
-
-// ---------- game state that isn't saved ----------
-const ui = { shop: false, high: false, index: false, pick: 0 };
+// =====================================================================
+// 8. GAME STATE (the parts that don't get saved)
+// =====================================================================
 let screen = "title";
-const rock = { costume: 0, size: 700, dir: 90, bright: 0 };
-const game = { cool: 0, breakPause: 0, swing: 0, swingT: 0, drillAcc: 0, saveT: 0 };
-const floaters = [];   // the mineral clones that float up and fade
-let toast = null;      // "NEW MINERAL!" text
+let T = 0;                 // ticks since start (30 per second)
 const rand = Math.random;
 const randInt = (a, b) => a + Math.floor(rand() * (b - a + 1));
+const rock = { shape: rockShape(1), dmg: 0, rot: 0, size: 1, bright: 0, flash: 0, squash: 0, pop: 1, pause: 0 };
+const game = { cool: 0, swing: 1, smear: 0, shake: 0, px: 0, py: 0, drillT: 0, goldShown: 0, incomeHist: [], lastTotal: 0 };
+const floaters = [];       // his mineral "clones" that float up and fade
+const boulders = [];       // cave-in rocks
+const ev = { rush: 0, vein: 0, next: 30 * 75 };
+const police = { state: "off", x: 0, walk: 0, purpose: null, quota: null, wait: 0 };
+let introAt = 0;
 
 function newRock() {
-  // his reset: turn right (1..180), brightness -15..0, size 650..750
-  rock.costume = 0;
-  rock.dir = (rock.dir + randInt(1, 180)) % 360;
+  // his reset: turn right 1..180, brightness -15..0, size 650..750
+  rock.shape = rockShape(randInt(1, 1e9));
+  rock.dmg = 0;
+  rock.rot = rand() * TAU;
+  rock.size = randInt(650, 750) / 700;
   rock.bright = randInt(-15, 0);
-  rock.size = randInt(650, 750);
+  rock.pop = 0;
 }
 newRock();
+function overRock() { const r = lay.R * rock.size; return Math.hypot(mouse.x - lay.rockX, mouse.y - lay.rockY) <= r * 1.05; }
+function maxTierFound() { let t = -1; S.found.forEach((n, i) => { if (n > 0) t = Math.max(t, tierOf(MINERALS[i].rarity)); }); return t; }
+function shake(n) { if (settings.shake) game.shake = Math.max(game.shake, n); }
 
-function overRock() {
-  const r = 6.86 * rock.size / 100 * 0.95;
-  const dx = mouse.x - 25, dy = mouse.y - (-95);
-  return dx * dx + dy * dy <= r * r;
-}
-
-// ---------- Rock police (his unfinished Player2 + Sprite1 speech bubbles) ----------
-// He walks in from the right, the two of you talk, and he walks off again.
-const police = { stage: "wait", t: 0, x: 186, costume: 0, line: 0, at: 0 };
-function schedulePolice() { police.stage = S.police ? "done" : "wait"; police.at = randInt(1, 10) * 30; police.t = 0; }
-
-// ---------- press handling (Scratch "when this sprite clicked" fires on press) ----------
-function onPress() {
-  if (screen === "title") { titlePress(); return; }
-  if (ui.index) { indexPress(); return; }
-  if (police.stage === "talk" && mouse.y > 50) { nextLine(); return; }
-  if (ui.shop) {
-    for (const kind of ["mult", "speed", "drill"]) {
-      if (overButton(btn[kind], shopCostume(kind))) {
-        if (S[kind] >= SHOP[kind].length) return;       // sold out
-        if (buy(S, kind)) { play("pop"); btn[kind].flash = 3; save(); }
-        else btn[kind].shake = 8;                       // can't afford: wiggle
-        return;
-      }
-    }
-  }
-  if (overButton(btn.shop, C.shopButton)) { ui.shop = !ui.shop; btn.shop.flash = 3; return; }
-  if (overButton(btn.high, C.highscoreButton)) { ui.high = !ui.high; btn.high.flash = 3; return; }
-  if (overButton(btn.index, C.indexButton)) { ui.index = true; btn.index.flash = 3; return; }
-}
-
-// ---------- one Scratch frame of game logic ----------
-function tick() {
-  for (const k in btn) {
-    const b = btn[k];
-    let c = k === "shop" ? C.shopButton : k === "high" ? C.highscoreButton : k === "index" ? C.indexButton : shopCostume(k);
-    const visible = (k === "mult" || k === "speed" || k === "drill") ? ui.shop : true;
-    const target = visible && !ui.index && overButton(b, c) ? b.hover : b.normal;
-    b.size += (target - b.size) / 4;
-    if (b.flash > 0) b.flash--;
-    if (b.shake > 0) b.shake--;
-  }
-
-  // Mining: hold the mouse on the rock. Each hit = pickaxe sound + next costume.
-  if (game.breakPause > 0) {
-    if (--game.breakPause === 0) newRock();
-  }
-  game.cool -= DT;
-  const mining = mouse.down && overRock() && !ui.index;
-  if (mining && game.breakPause === 0 && game.cool <= 0) {
-    play("pickaxe");
-    rock.costume++;
-    game.cool = hitInterval(S) - DT * 0.5;
-    if (rock.costume >= HITS_PER_ROCK) {
-      // "Rock fully broken": stop sounds, crunch, spawn the mineral
-      stopAllSounds();
-      play("rockBreak");
-      const i = breakRock(S, rand);
-      const isNew = S.found[i] === 1;
-      floaters.push({ i, y: -15, ghost: 0, gained: MINERALS[i].gold * goldMult(S), mult: goldMult(S) });
-      if (MINERALS[i].gold >= 5000) play("shine");
-      if (isNew) toast = { text: "NEW MINERAL: " + MINERALS[i].name + "!", t: 75, color: MINERALS[i].rarity };
-      game.breakPause = BREAK_PAUSE_TICKS;
-    }
-  }
-
-  // Player swing: costume1, wait Mining speed, costume2, wait Mining speed
-  if (game.swingT > 0) game.swingT -= DT;
-  if (game.swingT <= 0) {
-    if (game.swing === 1) { game.swing = 2; game.swingT = speedOf(S).mining + DT; }
-    else if (mining) { game.swing = 1; game.swingT = speedOf(S).mining + DT; }
-    else game.swing = 0;
-  }
-
-  // Mineral clones: move 5 up and ghost +5, 20 times
-  for (const f of floaters) { f.y += 5; f.ghost += 5; }
-  while (floaters.length && floaters[0].ghost >= 100) floaters.shift();
-  if (toast && --toast.t <= 0) toast = null;
-
-  // Drill: Gold per second
-  const pps = drillPPS(S);
-  if (pps > 0) {
-    game.drillAcc += pps * DT;
-    const whole = Math.floor(game.drillAcc);
-    if (whole > 0) { S.gold += whole; game.drillAcc -= whole; }
-  }
-  if (S.gold > S.high) S.high = S.gold;   // his highscore forever-loop
-
-  tickPolice();
-
-  if (++game.saveT >= 60) { game.saveT = 0; save(); }
-}
-
-function tickPolice() {
-  const p = police;
-  if (p.stage === "done") return;
-  p.t++;
-  if (p.stage === "wait") { if (p.t >= p.at) { p.stage = "in"; p.t = 0; p.x = 186; } return; }
-  if (p.stage === "in" || p.stage === "out") {
-    // move 30 steps every 0.1 s, flipping between his two walk costumes
-    if (p.t % 3 === 0) { p.x += p.stage === "in" ? -30 : 30; p.costume = 1 - p.costume; }
-    if (p.t >= 12) {
-      p.t = 0; p.costume = 0;
-      if (p.stage === "in") { p.stage = "talk"; p.line = 0; }
-      else { p.stage = "done"; S.police = true; save(); }
-    }
+// ---------- mining ----------
+function hit() {
+  game.cool = hitInterval(S) - DT / 2;
+  game.swing = 0; game.smear = 1;
+  playHis("pickaxe", 0.7);
+  const ix = lay.rockX - lay.R * 0.78, iy = lay.rockY - lay.R * 0.15;
+  if (LAYERS[S.layer].core) {
+    if (S.coreBroken) return;
+    S.coreHP -= pickPower(S);
+    rock.flash = 0.5; shake(3);
+    burstSparks(ix, iy, 6, "#ffcc55", 7);
+    if (T % 3 === 0) playHis("hitRock", 0.5);
+    if (S.coreHP <= 0) coreBreak();
     return;
   }
-  if (p.stage === "talk" && p.t >= 75) nextLine();
+  rock.dmg += pickPower(S);
+  rock.flash = 0.55; rock.squash = 1;
+  burstChips(ix, iy, 4, ROCK_PAL[S.layer]);
+  shake(2.5);
+  if (rock.dmg >= rockHP(S)) breakIt();
+}
+function breakIt() {
+  // his "Rock fully broken": stop sounds, crunch, a mineral pops out
+  stopHis(); playHis("rockBreak");
+  const id = breakRock(S, rand, { rush: ev.rush > 0, vein: ev.vein > 0 });
+  if (ev.vein > 0) ev.vein--;
+  if (police.quota) police.quota.got++;
+  const m = MINERALS[id], tier = tierOf(m.rarity), isNew = S.found[id] === 1;
+  burstChips(lay.rockX, lay.rockY, 18, ROCK_PAL[S.layer], 1.4);
+  shake(6 + tier);
+  floaters.push({ id, life: 0, max: 20 + tier * 7, gained: payout(S, id, ev.rush > 0), isNew });
+  SFX.find(tier);
+  if (tier >= 2) burstSparks(lay.rockX, lay.rockY - lay.R, 6 + tier * 4, rarityGlowColor(m.rarity, T / 30), 5 + tier);
+  if (tier >= 5) {
+    playHis("shine", 0.7);
+    ui.flash = { c: rarityGlowColor(m.rarity, T / 30), a: 0.15 + tier * 0.04 };
+    banner(m.rarity.toUpperCase() + "!", m.name, rarityGlowColor(m.rarity, T / 30), 70);
+  } else if (isNew) banner("NEW MINERAL", m.name, rarityColor(m.rarity, T / 30), 60);
+  rock.pause = BREAK_PAUSE_TICKS;
+  anims.goldbump = 1;
+}
+function coreBreak() {
+  S.coreHP = 0; S.coreBroken = true;
+  S.found[CORE_MINERAL]++;
+  addGold(S, payout(S, CORE_MINERAL, false));
+  SFX.boom(); playHis("rockBreak"); playHis("cobble");
+  shake(30);
+  ui.flash = { c: "#ffffff", a: 1 };
+  burstSparks(lay.rockX, lay.rockY, 120, "#ffd060", 14);
+  burstChips(lay.rockX, lay.rockY, 40, { body: "#5a3a2c", light: "#8a5a3a" }, 2.2);
+  confetti(160);
+  floaters.push({ id: CORE_MINERAL, life: 0, max: 140, gained: payout(S, CORE_MINERAL, false), isNew: true });
+  save();
+  setTimeout(() => startPolice("ending"), 2200);
+}
+function confetti(n) { const cols = ["#ffcc33", "#ff5a4a", "#7dff6a", "#4dc3ff", "#ff7af0", "#ffffff"]; for (let i = 0; i < n; i++) addPart({ k: "confetti", x: rand() * W, y: lay.hud - rand() * 200, vx: (rand() - 0.5) * 4, vy: rand() * 3, rot: rand() * TAU, vr: (rand() - 0.5) * 0.3, c: cols[i % cols.length], life: 0, max: 160 + rand() * 80 }); }
+
+// ---------- shop buttons ----------
+const SPEED_NAMES = ["+10% mining speed", "+25% mining speed", "+50% mining speed", "+75% mining speed", "+100% mining speed"];
+function cardInfo(k) {
+  const lv = S[k], list = UPG[k], next = list && list[lv];
+  const base = { k, level: lv, max: list ? list.length : 0, cost: nextCost(S, k), sold: !next };
+  switch (k) {
+    case "mult": return Object.assign(base, { icon: "mult", title: next ? (next.label || `X${next.v} Money multiplier`) : "Money multiplier", sub: next ? `Every mineral is worth x${next.v} (now x${goldMult(S)})` : `Maxed at x${goldMult(S)}` });
+    case "speed": return Object.assign(base, { icon: "speed", title: next ? SPEED_NAMES[lv] : "Mining speed", sub: next ? `A hit every ${(speedOf(S).breaking).toFixed(2)}s → ${next.breaking.toFixed(2)}s` : "As fast as a pickaxe can go" });
+    case "drill": return Object.assign(base, { icon: "drill", title: next ? (next.label || `Drill MK ${lv + 1}`) : "Drill", sub: next ? (next.sub || `+${next.v} Gold P/S`) + ` (now ${fmt(drillPPS(S))}/s)` : `${fmt(drillPPS(S))} Gold per second` });
+    case "pick": return Object.assign(base, { icon: "pick", title: next ? next.label : "Rektium pickaxe", sub: next ? `${next.v} damage per hit (now ${pickPower(S)})` : `${pickPower(S)} damage per hit` });
+    case "luck": return Object.assign(base, { icon: "luck", title: next ? next.label : "Lucky charm III", sub: next ? `Roll ${next.v} minerals, keep the rarest` : `${luckRolls(S)} rolls per rock` });
+    case "dig": {
+      if (S.maxLayer < LAYERS.length - 1) return { k, icon: "dig", level: S.maxLayer, max: LAYERS.length - 1, cost: nextCost(S, "dig"), sold: false, title: `Dig to ${LAYERS[S.maxLayer + 1].name}`, sub: S.maxLayer + 1 === 4 ? "The very bottom. Something glows down there..." : `Tougher rocks, ${LAYER_MINERALS[S.maxLayer + 1].length} new minerals` };
+      if (!S.coreBroken) return { k, icon: "dig", level: 4, max: 4, cost: Infinity, sold: false, locked: true, title: "Break the Core!", sub: `${fmt(S.coreHP)} / ${fmt(CORE_HP)} HP left` };
+      return { k, icon: "rebirth", level: S.rebirths, max: 0, cost: 0, sold: false, rebirth: true, title: "REBIRTH", sub: `Start over with x${rebirthMult(S) * 2} gold forever` };
+    }
+  }
+}
+function tryBuy(k, rect) {
+  const info = cardInfo(k);
+  if (info.rebirth) { ui.confirm = { title: "Rebirth?", text: ["Gold, upgrades and depth reset.", "You keep your Mineral Index and trophies.", `All gold x${rebirthMult(S) * 2} forever!`], yes: doRebirth }; openModal("confirm"); return; }
+  if (info.sold || info.locked) { SFX.deny(); anims["shake_" + k] = 1; return; }
+  const prevLayer = S.layer;
+  if (!buy(S, k)) { SFX.deny(); anims["shake_" + k] = 1; return; }
+  SFX.buy();
+  burstSparks(rect.x + rect.w - 40, rect.y + rect.h / 2, 14, "#ffcc33", 5);
+  if (k === "dig") { const to = S.layer; S.layer = prevLayer; SFX.levelUp(); goLayer(to, true); }
+  save();
+}
+function doRebirth() {
+  S = rebirth(S);
+  SFX.levelUp(); confetti(120);
+  ev.rush = 0; ev.vein = 0; music.rush = false;
+  goLayer(0, true);
+  game.goldShown = 0;
+  save();
+}
+function goLayer(L, announce) { ui.trans = { t: 0, to: L, announce }; }
+
+// ---------- events ----------
+function banner(title, sub, color, dur = 90, icon) { ui.banner = { title, sub, color, t: 0, max: dur, icon }; }
+function startEvent(force) {
+  const opts = ["rush", "cavein", "vein"];
+  if (S.police && S.speed >= 3 && police.state === "off" && !LAYERS[S.layer].core) opts.push("quota", "quota");
+  const e = force || opts[Math.floor(rand() * opts.length)];
+  if (e === "rush") { ev.rush = 30 * 20; music.rush = true; SFX.alarm(); banner("GOLD RUSH!", "Everything is worth x3 for 20 seconds", "#ffcc33", 100, "rush"); award("rush"); }
+  if (e === "vein") { ev.vein = 10; SFX.find(3); banner("CRYSTAL VEIN!", "The next 10 rocks are extra lucky", "#4dc3ff", 100, "vein"); }
+  if (e === "cavein") {
+    SFX.rumble(); playHis("cobble"); shake(14);
+    banner("CAVE-IN!", "Click the falling rocks to smash them!", "#ff7a4a", 100, "cavein");
+    const n = randInt(5, 8);
+    for (let i = 0; i < n; i++) boulders.push({ x: lay.sceneL + 60 + rand() * (W - lay.sceneL - 120), y: lay.hud - 60 - rand() * 400, vy: 0, r: (24 + rand() * 14) * lay.s * 1.2, shape: rockShape(randInt(1, 1e9)), rot: rand() * TAU, vr: (rand() - 0.5) * 0.1, landed: 0 });
+  }
+  if (e === "quota") startPolice("quota");
+}
+function scenePress() {
+  for (let i = boulders.length - 1; i >= 0; i--) {
+    const b = boulders[i];
+    if (Math.hypot(mouse.x - b.x, mouse.y - b.y) <= b.r * 1.25) {
+      boulders.splice(i, 1);
+      playHis("punch", 0.8); SFX.boom();
+      burstChips(b.x, b.y, 14, ROCK_PAL[Math.min(S.layer, 3)], 1.1);
+      const g = payout(S, rollMineral(Math.min(S.layer, 3), luckRolls(S), rand), ev.rush > 0) * 2;
+      addGold(S, g); S.boulders++;
+      floatText(b.x, b.y - b.r, "+" + fmt(g), "#ffcc33", 22);
+      mouse.ui = true;
+      return;
+    }
+  }
+}
+
+// ---------- the Rock police ----------
+const INTRO = [["you", "Huh?!"], ["you", "You startled me a bit there..."], ["you", "And who are you??"], ["police", "I am the Rock police."]];
+function startPolice(purpose) {
+  police.state = "in"; police.purpose = purpose; police.x = W + 80; police.walk = 0;
+  if (purpose !== "intro") SFX.whistle();
+}
+function say(lines, onDone) { ui.dialog = { lines, i: 0, ch: 0, idle: 0, onDone }; }
+function policeArrived() {
+  const p = police;
+  if (p.purpose === "intro") say(INTRO, () => { award("police"); p.state = "out"; S.police = true; save(); });
+  else if (p.purpose === "quota") {
+    const per = (Math.ceil(rockHP(S) / pickPower(S)) * hitInterval(S) + 0.1);
+    const need = clamp(Math.floor(30 / per * 0.7), 5, 40);
+    say([["police", `ROCK INSPECTION! Break ${need} rocks in 30 seconds.`], ["you", "Uh... okay?"]], () => { p.quota = { need, got: 0, t: 30 * 30 }; p.state = "stand"; banner("ROCK INSPECTION", `Break ${need} rocks in 30 seconds`, "#9ab0ff", 80, "police"); });
+  } else if (p.purpose === "ending") {
+    say([["police", "..."], ["police", "You broke the CORE?!"], ["you", "Huh?! Was I not supposed to?"], ["police", "Nobody has ever done that. Not even the Rock police."], ["police", "...That's it. You're promoted. You are the Rock police now."]],
+      () => { p.state = "out"; award("core"); openModal("ending"); SFX.levelUp(); confetti(100); });
+  }
+}
+function quotaTick() {
+  const q = police.quota; if (!q) return;
+  q.t--;
+  if (q.got >= q.need) {
+    police.quota = null;
+    const perSec = Math.max(500, (game.incomeHist.length > 1 ? (game.incomeHist[game.incomeHist.length - 1] - game.incomeHist[0]) / (game.incomeHist.length - 1) : 0));
+    const reward = Math.floor(perSec * 60);
+    addGold(S, reward); S.quotas++;
+    SFX.buy(); SFX.levelUp();
+    say([["police", "Hmm. Good rock breaking."], ["police", `Here's ${fmt(reward)} Gold. Keep it up.`]], () => { police.state = "out"; });
+    save();
+  } else if (q.t <= 0) {
+    police.quota = null;
+    SFX.deny();
+    say([["police", "Hmph. Too slow."], ["police", "The Rock police is watching you..."]], () => { police.state = "out"; });
+  }
+}
+
+// ---------- achievements ----------
+const ACH = [
+  { id: "first", name: "First Crack", desc: "Break your first rock", test: s => s.rocks >= 1 },
+  { id: "r100", name: "Rock Breaker", desc: "Break 100 rocks", test: s => s.rocks >= 100 },
+  { id: "r1000", name: "Boulder Basher", desc: "Break 1 000 rocks", test: s => s.rocks >= 1000 },
+  { id: "r10000", name: "Most Wanted", desc: "Break 10 000 rocks", test: s => s.rocks >= 10000 },
+  { id: "rare", name: "Shiny!", desc: "Find a Rare mineral", test: () => maxTierFound() >= 2 },
+  { id: "legend", name: "Legendary Luck", desc: "Find a Legendary mineral", test: () => maxTierFound() >= 4 },
+  { id: "myth", name: "Mythical", desc: "Find a Mythical mineral", test: () => maxTierFound() >= 5 },
+  { id: "celest", name: "Out of This World", desc: "Find a Celestial mineral", test: () => maxTierFound() >= 7 },
+  { id: "exotic", name: "Exotic Taste", desc: "Find an Exotic mineral", test: () => maxTierFound() >= 8 },
+  { id: "admin", name: "Admin Abuse", desc: "Find an Admin mineral", test: () => maxTierFound() >= 12 },
+  { id: "sold", name: "Sold Out", desc: "Buy every upgrade from the original shop", test: s => s.mult >= 7 && s.speed >= 5 && s.drill >= 4 },
+  { id: "g6", name: "Millionaire", desc: "Have 1M Gold", test: s => s.high >= 1e6 },
+  { id: "g9", name: "Billionaire", desc: "Have 1B Gold", test: s => s.high >= 1e9 },
+  { id: "g12", name: "Trillionaire", desc: "Have 1T Gold", test: s => s.high >= 1e12 },
+  { id: "deep", name: "Going Down", desc: "Reach the Deep Cave", test: s => s.maxLayer >= 1 },
+  { id: "magma", name: "Hot Stuff", desc: "Reach the Magma Depths", test: s => s.maxLayer >= 2 },
+  { id: "void", name: "Into the Void", desc: "Reach The Void", test: s => s.maxLayer >= 3 },
+  { id: "core", name: "Core Breaker", desc: "Break the Core", test: s => s.coreBroken },
+  { id: "reborn", name: "Born Again", desc: "Rebirth once", test: s => s.rebirths >= 1 },
+  { id: "idx0", name: "Collector", desc: "Find every mineral in the Rock Cave", test: s => LAYER_MINERALS[0].every(m => s.found[m.id] > 0) },
+  { id: "idxAll", name: "Geologist", desc: "Find every single mineral", test: s => s.found.every(n => n > 0) },
+  { id: "boulder", name: "Cave-in Survivor", desc: "Smash 10 cave-in rocks", test: s => s.boulders >= 10 },
+  { id: "quota", name: "Law Abiding", desc: "Pass 3 Rock inspections", test: s => s.quotas >= 3 },
+  { id: "rush", name: "Gold Fever", desc: "Be there for a Gold Rush", test: () => false },
+  { id: "police", name: "Who Are You??", desc: "Meet the Rock police", test: () => false },
+];
+function award(id) {
+  if (S.ach[id]) return;
+  const a = ACH.find(a => a.id === id); if (!a) return;
+  S.ach[id] = true;
+  ui.toasts.push({ a, t: 0 });
+  SFX.levelUp();
+  save();
+}
+function checkAch() { for (const a of ACH) if (!S.ach[a.id] && a.test(S)) award(a.id); }
+
+// =====================================================================
+// 9. ONE TICK OF GAME LOGIC (30 per second, like Scratch)
+// =====================================================================
+function tick() {
+  T++;
+  updateParts(lay.ground);
+  updateMotes(lay, S.layer);
+  if (game.shake > 0.1) game.shake *= 0.85; else game.shake = 0;
+  if (ui.flash) { ui.flash.a *= 0.9; if (ui.flash.a < 0.01) ui.flash = null; }
+  if (ui.banner && ++ui.banner.t >= ui.banner.max) ui.banner = null;
+  if (ui.toasts.length && ++ui.toasts[0].t > 120) ui.toasts.shift();
+  if (ui.layerCard > 0) ui.layerCard--;
+  if (ui.resetArmed > 0) ui.resetArmed--;
+  if (ui.trans) {
+    const tr = ui.trans; tr.t++;
+    if (tr.t === 14) {
+      S.layer = tr.to; caveCache = null; music.layer = S.layer; boulders.length = 0; floaters.length = 0; police.state = police.state === "stand" ? "off" : police.state; police.quota = null;
+      rock.pause = 0; newRock(); computeLayout();
+      if (tr.announce) { ui.layerCard = 110; SFX.levelUp(); }
+    }
+    if (tr.t >= 28) ui.trans = null;
+  }
+  if (screen !== "game") { game.swing = Math.min(1, game.swing + 0.05); if (T % 25 === 0) { game.swing = 0; } return; }
+
+  S.time += DT;
+  // mining (hold the mouse on the rock, or hold Space)
+  if (rock.pause > 0 && --rock.pause === 0) newRock();
+  game.cool -= DT;
+  const mining = !ui.modal && !ui.trans && ((mouse.down && !mouse.ui && overRock()) || spaceDown);
+  const coreDone = LAYERS[S.layer].core && S.coreBroken;
+  if (mining && !coreDone && rock.pause === 0 && game.cool <= 0) hit();
+  // pickaxe swing: down on the hit, back up before the next one (his 2 costumes)
+  game.swing = Math.min(1, game.swing + DT / Math.max(hitInterval(S) * 0.8, DT * 2));
+  game.smear *= 0.7;
+  rock.flash *= 0.7; rock.squash *= 0.75; rock.pop = Math.min(1, rock.pop + 0.12);
+  for (const f of floaters) f.life++;
+  while (floaters.length && floaters[0].life >= floaters[0].max) floaters.shift();
+
+  // drill income
+  const pps = drillPPS(S);
+  if (pps > 0) {
+    addGold(S, pps * DT);
+    if (++game.drillT >= 30) { game.drillT = 0; floatText(lay.drillX + 30 * lay.s, lay.ground - 90 * lay.s, "+" + fmt(pps), "#ffcc33", 15); }
+    if (T % 4 === 0) burstSparks(lay.rockX + lay.R * 0.95, lay.ground - 48 * lay.s, 1, "#ffd27a", 4);
+  }
+  if (T % 30 === 0) { game.incomeHist.push(S.totalGold); if (game.incomeHist.length > 61) game.incomeHist.shift(); }
+
+  // events
+  if (ev.rush > 0 && --ev.rush === 0) music.rush = false;
+  if (ev.rush > 0 && T % 3 === 0) addPart({ k: "ember", x: rand() * W, y: H, vx: 0, vy: -2 - rand() * 2, c: "#ffcc33", life: 0, max: 120 });
+  if ((S.layer === 2 || S.layer === 4) && T % 4 === 0) addPart({ k: "ember", x: rand() * W, y: H - 20, vx: (rand() - 0.5), vy: -1 - rand() * 1.5, c: "#ff8a2a", life: 0, max: 140 });
+  if (!ui.dialog && police.state === "off" && !ui.trans && !(LAYERS[S.layer].core && !S.coreBroken)) { if (--ev.next <= 0) { ev.next = 30 * randInt(70, 140); startEvent(); } }
+  for (let i = boulders.length - 1; i >= 0; i--) {
+    const b = boulders[i];
+    if (b.landed) { if (++b.landed > 30 * 9) { burstChips(b.x, b.y, 6, ROCK_PAL[0], 0.6); boulders.splice(i, 1); } continue; }
+    b.vy += 0.5; b.y += b.vy; b.rot += b.vr;
+    if (b.y >= lay.ground - b.r) { b.y = lay.ground - b.r; if (b.vy > 4) { b.vy *= -0.3; shake(4); burstChips(b.x, b.y + b.r, 4, ROCK_PAL[0], 0.6); playHis("punch", 0.3); } else b.landed = 1; }
+  }
+
+  // Rock police: first visit after a random 1-10 seconds (his Player2 wait)
+  if (!S.police && police.state === "off" && S.time > introAt) startPolice("intro");
+  if (police.state === "in") { police.walk += 0.25; police.x -= 6 * lay.s; if (police.x <= lay.policeX) { police.x = lay.policeX; police.state = "stand"; policeArrived(); } }
+  else if (police.state === "stand") { police.x = lay.policeX; }
+  else if (police.state === "out") { police.walk += 0.25; police.x += 7 * lay.s; if (police.x > W + 100) police.state = "off"; }
+  quotaTick();
+  if (ui.dialog) { const d = ui.dialog, line = d.lines[d.i][1]; if (d.ch < line.length) d.ch += 1.4; else if (++d.idle > 30 * 3.5) nextLine(); }
+
+  if (T % 30 === 0) checkAch();
+  if (T % 60 === 0) save();
 }
 function nextLine() {
-  police.t = 0;
-  if (++police.line >= C.bubbles.length) { police.stage = "out"; }
+  const d = ui.dialog; if (!d) return;
+  const line = d.lines[d.i][1];
+  if (d.ch < line.length) { d.ch = line.length; return; }
+  d.i++; d.ch = 0; d.idle = 0;
+  if (d.i >= d.lines.length) { ui.dialog = null; if (d.onDone) d.onDone(); }
 }
 
-// ---------- drawing ----------
-// Draw a costume at Scratch position (x, y), size in %, direction in degrees.
-function drawCostume(c, x, y, size = 100, dir = 90, alpha = 1, bright = 0) {
-  if (!c || !c.w || !c.img.complete || !c.img.naturalWidth) return;
-  const k = size / 100;
+// =====================================================================
+// 10. DRAWING THE UI
+// =====================================================================
+function rr(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+// text with a dark outline (every label in the game uses this)
+function label(text, x, y, size, color = "#f4ead8", align = "left", font = FONT_T, outline = true, base = "alphabetic") {
+  ctx.font = `${font === FONT_B ? "800 " : ""}${size}px ${font}`;
+  ctx.textAlign = align; ctx.textBaseline = base;
+  if (outline) { ctx.lineJoin = "round"; ctx.lineWidth = Math.max(3, size * 0.2); ctx.strokeStyle = INK; ctx.strokeText(text, x, y); }
+  ctx.fillStyle = color; ctx.fillText(text, x, y);
+  return ctx.measureText(text).width;
+}
+function textW(text, size, font = FONT_T) { ctx.font = `${font === FONT_B ? "800 " : ""}${size}px ${font}`; return ctx.measureText(text).width; }
+function panel(x, y, w, h, r = 16, o = {}) {
   ctx.save();
-  ctx.translate(240 + x, 180 - y);
-  if (dir !== 90) ctx.rotate((dir - 90) * Math.PI / 180);
-  ctx.globalAlpha = alpha;
-  if (bright) ctx.filter = `brightness(${Math.max(0, 1 + bright * 0.016)})`;
-  ctx.drawImage(c.img, -c.cx * k, -c.cy * k, c.w * k, c.h * k);
+  rr(x, y + 6, w, h, r); ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fill();
+  rr(x, y, w, h, r);
+  const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, o.top || "#3a302a"); g.addColorStop(1, o.bot || "#211a16");
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  rr(x + 4, y + 4, w - 8, h - 8, r - 3); ctx.lineWidth = 2; ctx.strokeStyle = o.rim || "rgba(255,220,170,0.12)"; ctx.stroke();
   ctx.restore();
 }
-function drawButton(b, c) {
-  const shake = b.shake ? Math.sin(b.shake * 2.2) * 3 : 0;
-  drawCostume(c, b.x + shake, b.y, b.size, 90, 1, b.flash ? -20 : 0);
-}
-
-// numbers with spaces like on his costumes: 250 000
-function fmt(n) {
-  n = Math.floor(n);
-  if (n < 1e15) return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  return n.toExponential(2).replace("e+", "e");
-}
-
-// Scratch-style variable monitors
-function largeMonitor(x, y, value) {
-  ctx.font = "bold 15px Helvetica, Arial, sans-serif";
-  const w = Math.max(36, ctx.measureText(value).width + 10);
-  roundRect(x, y, w, 21, 4, "#ff8c1a", "rgba(0,0,0,0.25)");
-  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(value, x + w / 2, y + 11.5);
-}
-function normalMonitor(x, y, label, value) {
-  ctx.font = "bold 11px Helvetica, Arial, sans-serif";
-  const lw = ctx.measureText(label).width;
-  ctx.font = "11px Helvetica, Arial, sans-serif";
-  const vw = Math.max(30, ctx.measureText(value).width + 10);
-  const w = lw + vw + 16;
-  roundRect(x, y, w, 22, 4, "#e6f0ff", "#c3ccd9");
-  ctx.textBaseline = "middle"; ctx.textAlign = "left";
-  ctx.fillStyle = "#575e75"; ctx.font = "bold 11px Helvetica, Arial, sans-serif";
-  ctx.fillText(label, x + 6, y + 11.5);
-  roundRect(x + lw + 10, y + 3, vw, 16, 4, "#ff8c1a", null);
-  ctx.fillStyle = "#fff"; ctx.font = "11px Helvetica, Arial, sans-serif"; ctx.textAlign = "center";
-  ctx.fillText(value, x + lw + 10 + vw / 2, y + 11.5);
-}
-function roundRect(x, y, w, h, r, fill, stroke) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
-}
-function rarityFill(rarity, x, w) {
-  const col = RARITY_COLOR[rarity];
-  if (col !== "rainbow") return col;
-  const g = ctx.createLinearGradient(x, 0, x + w, 0);
-  ["#ff0000", "#ff6f00", "#ffea00", "#26ff00", "#009bff", "#b35cff"].forEach((c, i, a) => g.addColorStop(i / (a.length - 1), c));
-  return g;
-}
-function outlinedText(text, x, y, fill, size, align = "left", weight = "bold") {
-  ctx.font = `${weight} ${size}px Helvetica, Arial, sans-serif`;
-  ctx.textAlign = align; ctx.textBaseline = "alphabetic";
-  ctx.lineJoin = "round"; ctx.lineWidth = Math.max(2, size / 5); ctx.strokeStyle = "rgba(0,0,0,0.85)";
-  ctx.strokeText(text, x, y);
-  ctx.fillStyle = typeof fill === "string" && RARITY_COLOR[fill] ? rarityFill(fill, x - (align === "center" ? ctx.measureText(text).width / 2 : 0), ctx.measureText(text).width) : fill;
-  ctx.fillText(text, x, y);
-}
-
-function drawGame() {
-  drawCostume(C.backdrop, 0, 0);
-
-  // Gold + Gold multiplier monitors (the labels are part of his backdrop)
-  largeMonitor(56, 1, fmt(S.gold));
-  largeMonitor(153, 25, String(goldMult(S)));
-  const pps = drillPPS(S);
-  if (pps) outlinedText(`Drill: +${pps} Gold/s`, 4, 62, "#fbff00", 11);
-
-  drawCostume(C.player[game.swing === 1 ? 0 : 1], -70, -100, 500);
-  if (rock.costume < HITS_PER_ROCK) drawCostume(C.rock[rock.costume], 25, -95, rock.size, rock.dir, 1, rock.bright);
-
-  for (const f of floaters) {
-    const a = 1 - f.ghost / 100;
-    drawCostume(C.minerals[f.i], 25, f.y, 200, 90, a);
-    if (f.mult > 1) { ctx.save(); ctx.globalAlpha = a; outlinedText("x" + f.mult + " = +" + fmt(f.gained), 240 + 25 + 48, 180 - f.y + 4, "#fbff00", 10); ctx.restore(); }
+const BTN_STYLE = {
+  gold: ["#ffdf6a", "#f0a020", "#3a2200"], stone: ["#5e4e42", "#3a2f27", "#f4ead8"], red: ["#ff7a6a", "#c83a2a", "#fff"],
+  green: ["#8aff6a", "#2fae3a", "#0e2a08"], dark: ["#2a2420", "#1a1512", "#7a6e62"],
+};
+function button(id, x, y, w, h, text, o = {}) {
+  const hov = hoverId === id && !o.disabled;
+  const a = anim(id + ":h", hov ? 1 : 0, 0.3), pr = anim(id + ":p", hov && mouse.down ? 1 : 0, 0.5);
+  const sh = anims["shake_" + id] || 0; if (sh) anims["shake_" + id] = sh < 0.02 ? 0 : sh * 0.85;
+  const st = BTN_STYLE[o.disabled ? "dark" : (o.style || "stone")];
+  const yy = y - a * 3 + pr * 3, xx = x + Math.sin(sh * 30) * sh * 8;
+  ctx.save();
+  rr(xx, y + 5, w, h, o.r || 12); ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fill();
+  rr(xx, yy, w, h, o.r || 12);
+  const g = ctx.createLinearGradient(0, yy, 0, yy + h); g.addColorStop(0, st[0]); g.addColorStop(1, st[1]);
+  ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = 3.5; ctx.strokeStyle = INK; ctx.stroke();
+  ctx.save(); rr(xx, yy, w, h, o.r || 12); ctx.clip();
+  ctx.fillStyle = `rgba(255,255,255,${0.16 + a * 0.12})`; ctx.fillRect(xx, yy, w, h * 0.42);
+  ctx.restore();
+  let tx = xx + w / 2;
+  if (o.icon) {
+    const isz = o.iconSize || h * 0.62;
+    if (text) { drawIcon(o.icon, xx + h * 0.55, yy + h / 2, isz, st[2]); tx = xx + h * 0.55 + (w - h * 0.55) / 2 + isz * 0.1; }
+    else drawIcon(o.icon, xx + w / 2, yy + h / 2, isz, st[2]);
   }
+  if (text) label(text, tx, yy + h / 2 + 1, o.size || h * 0.42, st[2], "center", FONT_T, o.style !== "gold" && o.style !== "green", "middle");
+  if (o.badge) { const bw = Math.max(22, textW(o.badge, 14) + 12); rr(xx + w - bw + 6, yy - 8, bw, 22, 11); ctx.fillStyle = "#ff5a4a"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = INK; ctx.stroke(); label(o.badge, xx + w - bw / 2 + 6, yy + 3, 14, "#fff", "center", FONT_T, false, "middle"); }
+  ctx.restore();
+  if (!o.disabled || o.always) reg(id, x, y, w, h, o.onClick);
+}
 
-  if (police.stage === "in" || police.stage === "talk" || police.stage === "out")
-    drawCostume(C.police[police.costume], police.x, -100, 500);
+function drawHUD() {
+  const h = lay.hud;
+  const g = ctx.createLinearGradient(0, 0, 0, h + 20); g.addColorStop(0, "rgba(12,9,7,0.95)"); g.addColorStop(1, "rgba(12,9,7,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, h + 20);
+  // gold
+  game.goldShown = game.goldShown + (S.gold - game.goldShown) * 0.25;
+  if (Math.abs(S.gold - game.goldShown) < 1) game.goldShown = S.gold;
+  const bump = anim("goldbump", 0, 0.15);
+  drawCoin(40, 42, 22 + bump * 6);
+  label(fmt(game.goldShown), 72, 56, 40 + bump * 4, ev.rush > 0 ? "#ffe066" : "#ffd447");
+  const bits = [`x${fmt(goldMult(S) * rebirthMult(S))} gold`];
+  if (drillPPS(S)) bits.push(`+${fmt(drillPPS(S))}/s`);
+  bits.push(`Best ${fmt(S.high)}`);
+  label(bits.join("   ·   "), 74, 78, 15, "#cbbca8", "left", FONT_B, true);
+  // layer badge with up/down arrows
+  const bw = 300, bx = W / 2 - bw / 2;
+  panel(bx, 10, bw, 62, 14);
+  label(LAYERS[S.layer].name.toUpperCase(), W / 2, 44, 26, ["#d8cbb8", "#a8d4ff", "#ffa060", "#c89aff", "#ffd060"][S.layer], "center");
+  label(`DEPTH ${S.layer + 1} / ${LAYERS.length}` + (S.rebirths ? `   ·   REBIRTH ${S.rebirths}` : ""), W / 2, 63, 13, "#9a8c7c", "center", FONT_B, false);
+  if (S.layer > 0) button("up", bx - 52, 16, 46, 50, "", { icon: "up", onClick: () => { SFX.click(); goLayer(S.layer - 1); } });
+  if (S.layer < S.maxLayer) button("down", bx + bw + 6, 16, 46, 50, "", { icon: "down", onClick: () => { SFX.click(); goLayer(S.layer + 1); } });
+  // right side buttons
+  const found = S.found.filter(n => n > 0).length;
+  const bs = 54; let x = W - bs - 14;
+  button("home", x, 14, bs, bs, "", { icon: "home", onClick: () => { SFX.click(); goTitle(); } }); x -= bs + 10;
+  button("snd", x, 14, bs, bs, "", { icon: settings.muted ? "mute" : "sound", onClick: () => { SFX.click(); openModal("sound"); } }); x -= bs + 10;
+  const achN = ACH.filter(a => S.ach[a.id]).length;
+  button("ach", x, 14, bs, bs, "", { icon: "trophy", badge: achN + "", onClick: () => { SFX.click(); openModal("ach"); } }); x -= bs + 10;
+  button("idx", x, 14, bs, bs, "", { icon: "book", badge: found + "", onClick: () => { SFX.click(); ui.idxLayer = Math.min(S.layer, 4); openModal("index"); } });
+  // shop button (bottom left, like his)
+  const anyBuy = ["mult", "speed", "drill", "pick", "luck", "dig"].some(k => { const c = cardInfo(k); return !c.sold && !c.locked && !c.rebirth && S.gold >= c.cost; });
+  const pulse = anyBuy && !ui.shop ? 0.5 + 0.5 * Math.sin(T / 30 * 5) : 0;
+  if (pulse) glow(110, H - 50, 120, "rgba(255,200,60,0.5)", pulse);
+  button("shopbtn", 20, H - 80, 180, 62, ui.shop ? "CLOSE" : "SHOP", { icon: "shop", style: "gold", size: 30, onClick: () => { SFX.click(); ui.shop = !ui.shop; } });
+  // event timers
+  let ey = h + 6;
+  if (ev.rush > 0) { timerBar(W / 2, ey, "GOLD RUSH x3", ev.rush / (30 * 20), "#ffcc33"); ey += 34; }
+  if (ev.vein > 0) { timerBar(W / 2, ey, `CRYSTAL VEIN: ${ev.vein} lucky rocks`, ev.vein / 10, "#4dc3ff"); ey += 34; }
+  if (police.quota) timerBar(W / 2, ey, `INSPECTION: ${police.quota.got} / ${police.quota.need} rocks`, police.quota.t / (30 * 30), "#9ab0ff");
+}
+function timerBar(cx, y, text, f, color) {
+  const w = 320, x = cx - w / 2;
+  rr(x, y, w, 28, 14); ctx.fillStyle = "rgba(10,8,6,0.8)"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+  rr(x + 4, y + 4, (w - 8) * clamp(f, 0, 1), 20, 10); ctx.fillStyle = color; ctx.globalAlpha = 0.35; ctx.fill(); ctx.globalAlpha = 1;
+  label(text, cx, y + 15, 16, color, "center", FONT_T, true, "middle");
+}
 
-  if (ui.shop) {
-    drawCostume(C.shopPanel, -185, -60, 300);
-    drawButton(btn.mult, shopCostume("mult"));
-    drawButton(btn.speed, shopCostume("speed"));
-    drawButton(btn.drill, shopCostume("drill"));
-  }
-  drawButton(btn.shop, C.shopButton);
-  drawButton(btn.index, C.indexButton);
-  drawButton(btn.high, C.highscoreButton);
-  if (ui.high) normalMonitor(3, 153, "☁ HIGHSCORE", fmt(S.high));
-
-  if (police.stage === "talk") drawCostume(C.bubbles[police.line], -108, 93, 300);
-
-  if (toast) {
-    ctx.save(); ctx.globalAlpha = Math.min(1, toast.t / 15);
-    outlinedText(toast.text, 240 + 25, 92, toast.color, 14, "center");
+function drawShop() {
+  ui.shopA = clamp(ui.shopA + (ui.shop ? 0.09 : -0.12), 0, 1);
+  if (ui.shopA <= 0) return;
+  const w = lay.shopW, x = lerp(-w - 40, 14, easeBack(ui.shopA)), y = lay.hud + 8, h = H - y - 96;
+  panel(x, y, w, h, 18);
+  label("SHOP", x + 22, y + 44, 34, "#ffd447");
+  label(fmt(S.gold) + " Gold", x + w - 20, y + 42, 18, "#cbbca8", "right", FONT_B);
+  reg("shoppanel", x, y, w, h, null);
+  const keys = ["mult", "speed", "drill", "pick", "luck", "dig"];
+  const top = y + 62, ch = Math.min(96, (h - 74) / keys.length - 8);
+  keys.forEach((k, i) => {
+    const info = cardInfo(k), cy = top + i * (ch + 8), cx = x + 12, cw = w - 24;
+    const id = "card_" + k;
+    const hov = hoverId === id;
+    const a = anim(id + ":h", hov ? 1 : 0, 0.3);
+    const sh = anims["shake_" + k] || 0; if (sh) anims["shake_" + k] = sh < 0.02 ? 0 : sh * 0.86;
+    const ox = Math.sin(sh * 30) * sh * 10 + a * 4;
+    const afford = !info.sold && !info.locked && S.gold >= info.cost;
+    ctx.save(); ctx.translate(ox, 0);
+    rr(cx, cy, cw, ch, 12);
+    const g = ctx.createLinearGradient(0, cy, 0, cy + ch);
+    g.addColorStop(0, info.rebirth ? "#2a5a30" : afford ? "#4e4032" : "#33291f"); g.addColorStop(1, info.rebirth ? "#163a1a" : afford ? "#2e251c" : "#231c16");
+    ctx.fillStyle = g; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = afford || info.rebirth ? `rgba(255,${200 + 40 * Math.sin(T / 6)},80,0.9)` : INK; ctx.stroke();
+    // icon box
+    rr(cx + 8, cy + 8, ch - 16, ch - 16, 10); ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fill();
+    drawIcon(info.icon, cx + ch / 2, cy + ch / 2, (ch - 16) * 0.75);
+    const tx = cx + ch + 2;
+    label(info.title, tx, cy + 28, 19, info.sold ? "#9a8c7c" : "#f4ead8");
+    ctx.save(); ctx.beginPath(); ctx.rect(tx, cy, cw - ch - 6, ch); ctx.clip();
+    label(info.sub, tx, cy + 48, 13, "#b0a290", "left", FONT_B, false);
     ctx.restore();
-  }
-  if (muted) outlinedText("muted (M)", 474, 354, "#bbb", 9, "right", "normal");
-
-  if (ui.index) drawIndex();
+    // level pips
+    if (info.max) for (let p = 0; p < info.max; p++) { ctx.beginPath(); ctx.arc(tx + 5 + p * 12, cy + ch - 16, 4, 0, TAU); ctx.fillStyle = p < info.level ? "#ffd447" : "rgba(255,255,255,0.12)"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = INK; ctx.stroke(); }
+    if (!info.sold && !info.locked && !info.rebirth) {
+      const cw2 = textW(fmt(info.cost), 18);
+      drawCoin(cx + cw - cw2 - 26, cy + ch - 18, 9);
+      label(fmt(info.cost), cx + cw - 12, cy + ch - 11, 18, afford ? "#ffd447" : "#c86a5a", "right");
+    }
+    if (info.sold) { ctx.save(); ctx.translate(cx + cw - 70, cy + ch / 2 + 6); ctx.rotate(-0.12); label("SOLD OUT", 0, 0, 22, "#ff3a2a", "center"); ctx.restore(); }   // like his red SOLD OUT
+    ctx.restore();
+    reg(id, cx, cy, cw, ch, () => tryBuy(k, { x: cx, y: cy, w: cw, h: ch }));
+  });
 }
 
-// ---------- Mineral index (his unused MineralIndexOpen variable, made real) ----------
-const IDX = { x: 20, y: 20, w: 440, h: 320, cols: 4, cell: 52, rowH: 50, gx: 32, gy: 60 };
-function indexCellAt(mx, my) {   // mx,my in canvas pixels (0..480 / 0..360)
-  for (let i = 0; i < MINERALS.length; i++) {
-    const cx = IDX.gx + (i % IDX.cols) * IDX.cell, cy = IDX.gy + Math.floor(i / IDX.cols) * IDX.rowH;
-    if (mx >= cx && mx < cx + IDX.cell - 4 && my >= cy && my < cy + IDX.rowH - 4) return i;
-  }
-  return -1;
-}
-function indexPress() {
-  const mx = mouse.x + 240, my = 180 - mouse.y;
-  const close = mx > IDX.x + IDX.w - 34 && mx < IDX.x + IDX.w - 6 && my > IDX.y + 6 && my < IDX.y + 30;
-  if (close || mx < IDX.x || mx > IDX.x + IDX.w || my < IDX.y || my > IDX.y + IDX.h) { ui.index = false; return; }
-  const i = indexCellAt(mx, my);
-  if (i >= 0) { ui.pick = i; play("pop"); }
-}
-// silhouette for minerals you haven't found yet
-const silhouettes = {};
-function silhouette(c, size) {
-  const key = c.file + size;
-  if (silhouettes[key]) return silhouettes[key];
-  if (!c.img.complete || !c.img.naturalWidth) return null;
-  const k = size / 100 * 3;      // draw at 3x so it stays crisp
-  const cv = document.createElement("canvas");
-  cv.width = Math.ceil(c.w * k); cv.height = Math.ceil(c.h * k);
-  const g = cv.getContext("2d");
-  g.drawImage(c.img, 0, 0, c.w * k, c.h * k);
-  g.globalCompositeOperation = "source-in";
-  g.fillStyle = "#1a1a1a"; g.fillRect(0, 0, cv.width, cv.height);
-  return (silhouettes[key] = cv);
+// ---------- modals ----------
+function openModal(m) { ui.modal = m; anims.modalA = 0; }
+function closeModal() { ui.modal = null; ui.confirm = null; }
+function modalFrame(w, h, title) {
+  const a = anim("modalA", 1, 0.2);
+  ctx.fillStyle = `rgba(0,0,0,${0.6 * a})`; ctx.fillRect(0, 0, W, H);
+  reg("modalbg", 0, 0, W, H, ui.modal === "ending" ? null : closeModal);
+  const x = W / 2 - w / 2, y = H / 2 - h / 2 + (1 - easeBack(a)) * 40;
+  ctx.save(); ctx.globalAlpha = a;
+  panel(x, y, w, h, 20);
+  reg("modal", x, y, w, h, null);
+  if (title) label(title, x + 28, y + 50, 34, "#ffd447");
+  if (ui.modal !== "ending") button("mclose", x + w - 62, y + 14, 46, 46, "", { icon: "close", onClick: () => { SFX.click(); closeModal(); } });
+  ctx.restore();
+  return { x, y, w, h };
 }
 function drawIndex() {
-  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0, 0, 480, 360);
-  roundRect(IDX.x, IDX.y, IDX.w, IDX.h, 8, "#3a3a3a", "#000");
-  roundRect(IDX.x + 3, IDX.y + 3, IDX.w - 6, IDX.h - 6, 6, null, "#5f5f5f");
-  const foundCount = S.found.filter(n => n > 0).length;
-  outlinedText("Mineral Index", IDX.x + 14, IDX.y + 26, "#fbff00", 18);
-  outlinedText(`${foundCount} / ${MINERALS.length} found  ·  ${fmt(S.rocks)} rocks broken`, IDX.x + 150, IDX.y + 25, "#ddd", 10, "left", "normal");
-  // close button
-  roundRect(IDX.x + IDX.w - 34, IDX.y + 6, 28, 24, 4, "#fff", "#000");
-  ctx.fillStyle = "#000"; ctx.font = "bold 14px Helvetica, Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("X", IDX.x + IDX.w - 20, IDX.y + 19);
+  const f = modalFrame(Math.min(W - 60, 1040), Math.min(H - 70, 640), "MINERAL INDEX");
+  const total = S.found.filter(n => n > 0).length;
+  label(`${total} / ${MINERALS.length} found`, f.x + 290, f.y + 48, 18, "#cbbca8", "left", FONT_B);
+  // tabs
+  const tabs = LAYERS.map(l => l.name);
+  let tx = f.x + 24;
+  tabs.forEach((n, L) => {
+    const known = L <= S.maxLayer || LAYER_MINERALS[L].some(m => S.found[m.id] > 0);
+    const tw = textW(known ? n : "???", 17) + 34;
+    button("tab" + L, tx, f.y + 70, tw, 40, known ? n : "???", { style: ui.idxLayer === L ? "gold" : "stone", size: 17, disabled: !known, onClick: () => { SFX.click(); ui.idxLayer = L; ui.idxPick = LAYER_MINERALS[L][0].id; } });
+    tx += tw + 8;
+  });
+  const list = LAYER_MINERALS[ui.idxLayer];
+  if (!list.some(m => m.id === ui.idxPick)) ui.idxPick = list[0].id;
+  const gx = f.x + 24, gy = f.y + 126, gw = f.w - 360, cw = 100, chh = 108;
+  const cols = Math.max(1, Math.floor(gw / (cw + 10)));
+  list.forEach((m, i) => {
+    const x = gx + (i % cols) * (cw + 10), y = gy + Math.floor(i / cols) * (chh + 10);
+    const found = S.found[m.id] > 0, sel = ui.idxPick === m.id, id = "min" + m.id, hov = hoverId === id;
+    rr(x, y, cw, chh, 12); ctx.fillStyle = sel ? "#4e4032" : hov ? "#3e332a" : "#2a221c"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = sel ? "#ffd447" : INK; ctx.stroke();
+    if (found) glow(x + cw / 2, y + 48, 44, rarityGlowColor(m.rarity, T / 30), 0.35);
+    drawMineral(m, x + cw / 2, y + 50, 30 + (hov ? 3 : 0), { sil: !found, t: T / 30 });
+    if (!found) label("?", x + cw / 2, y + 60, 28, "#6a5e52", "center");
+    rr(x + 8, y + chh - 12, cw - 16, 5, 2); ctx.fillStyle = found ? rarityColor(m.rarity, T / 30) : "#3a322a"; ctx.fill();
+    if (found) label("x" + fmt(S.found[m.id]), x + cw - 8, y + 20, 13, "#cbbca8", "right", FONT_B);
+    reg(id, x, y, cw, chh, () => { SFX.click(); ui.idxPick = m.id; });
+  });
+  // detail pane
+  const m = MINERALS[ui.idxPick], found = S.found[m.id] > 0;
+  const px = f.x + f.w - 324, py = f.y + 126, pw = 300, ph = f.h - 150;
+  rr(px, py, pw, ph, 14); ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+  const t = T / 30;
+  if (found) { glow(px + pw / 2, py + 120, 150, rarityGlowColor(m.rarity, t), 0.55 + 0.1 * Math.sin(t * 2)); for (let i = 0; i < 5; i++) star(px + pw / 2 + Math.cos(t + i * 1.3) * 90, py + 120 + Math.sin(t * 1.3 + i * 2) * 60, 6 * (0.5 + 0.5 * Math.sin(t * 4 + i)), "#fff"); }
+  drawMineral(m, px + pw / 2, py + 122 + Math.sin(t * 2) * 4, 82, { sil: !found, t });
+  const ly = py + 250;
+  label(found ? m.name : "???", px + pw / 2, ly, 26, "#ffffff", "center");
+  label(m.rarity, px + pw / 2, ly + 28, 20, rarityColor(m.rarity, t), "center");
+  const mult = goldMult(S) * rebirthMult(S);
+  label(`+${fmt(m.gold)} Gold`, px + pw / 2, ly + 60, 20, "#ffd447", "center");
+  label(`with your x${fmt(mult)}: +${fmt(m.gold * mult)}`, px + pw / 2, ly + 82, 14, "#cbbca8", "center", FONT_B, false);
+  const chance = m.d < 0 ? "Only from breaking the Core" : `Chance: 1 in ${fmt(Math.round(1 / CHANCE[m.id]))}`;
+  label(chance, px + pw / 2, ly + 112, 16, "#cbbca8", "center", FONT_B, false);
+  label(`Found: ${fmt(S.found[m.id])}`, px + pw / 2, ly + 136, 16, "#cbbca8", "center", FONT_B, false);
+}
+function drawAch() {
+  const f = modalFrame(Math.min(W - 60, 1040), Math.min(H - 70, 640), "TROPHIES");
+  const n = ACH.filter(a => S.ach[a.id]).length;
+  label(`${n} / ${ACH.length}`, f.x + 230, f.y + 48, 18, "#cbbca8", "left", FONT_B);
+  const cols = f.w > 900 ? 3 : 2, cw = (f.w - 48 - (cols - 1) * 10) / cols, chh = Math.min(64, (f.h - 100) / Math.ceil(ACH.length / cols) - 6);
+  ACH.forEach((a, i) => {
+    const x = f.x + 24 + (i % cols) * (cw + 10), y = f.y + 80 + Math.floor(i / cols) * (chh + 6);
+    const got = !!S.ach[a.id];
+    rr(x, y, cw, chh, 10); ctx.fillStyle = got ? "#4a3c22" : "#241d18"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = got ? "#ffd447" : INK; ctx.stroke();
+    drawIcon("trophy", x + chh / 2 + 2, y + chh / 2, chh * 0.62, got ? "#ffc21a" : "#4a4038");
+    label(a.name, x + chh + 6, y + chh * 0.45, 18, got ? "#ffe080" : "#8a7e70");
+    label(a.desc, x + chh + 6, y + chh * 0.8, 13, got ? "#d8cbb8" : "#6a5e52", "left", FONT_B, false);
+  });
+}
+function slider(name, x, y, w, text) {
+  label(text, x, y - 12, 20, "#f4ead8");
+  label(Math.round(settings[name] * 100) + "%", x + w, y - 12, 18, "#cbbca8", "right", FONT_B);
+  rr(x, y, w, 16, 8); ctx.fillStyle = "#1a1512"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+  rr(x + 3, y + 3, (w - 6) * settings[name], 10, 5); ctx.fillStyle = "#ffcc33"; ctx.fill();
+  const kx = x + w * settings[name];
+  ctx.beginPath(); ctx.arc(kx, y + 8, 14, 0, TAU); ctx.fillStyle = "#f4ead8"; ctx.fill(); ctx.lineWidth = 3.5; ctx.strokeStyle = INK; ctx.stroke();
+  ui.sliders[name] = { x, w };
+  reg("sl_" + name, x - 14, y - 14, w + 28, 44, () => { ui.drag = name; dragSlider(); });
+}
+function dragSlider() {
+  const s = ui.sliders[ui.drag]; if (!s) return;
+  settings[ui.drag] = clamp((mouse.x - s.x) / s.w, 0, 1);
+  applyVolumes();
+  if (ui.drag === "sfx" && T % 4 === 0) SFX.click();
+}
+function drawSound() {
+  const f = modalFrame(520, 470, "SOUND");
+  slider("music", f.x + 40, f.y + 120, f.w - 80, "Music");
+  slider("sfx", f.x + 40, f.y + 200, f.w - 80, "Effects");
+  button("mute", f.x + 40, f.y + 240, 200, 52, settings.muted ? "Unmute" : "Mute all", { icon: settings.muted ? "sound" : "mute", onClick: () => { toggleMute(); } });
+  button("shk", f.x + f.w - 240, f.y + 240, 200, 52, settings.shake ? "Shake: ON" : "Shake: OFF", { onClick: () => { settings.shake = !settings.shake; saveSettings(); SFX.click(); } });
+  const lines = ["Rock breaking sound: LordSonny (Pixabay)", "Pickaxe sound: CreatorsHome", "Game, minerals and ideas: Sixten (made in Scratch first)", "Keys: hold Space to mine · S shop · I index · M mute · Esc menu"];
+  lines.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 340 + i * 26, 15, i === 3 ? "#9a8c7c" : "#cbbca8", "center", FONT_B, false));
+}
+function drawConfirm() {
+  const c = ui.confirm; if (!c) { ui.modal = null; return; }
+  const f = modalFrame(520, 300, c.title);
+  c.text.forEach((l, i) => label(l, f.x + f.w / 2, f.y + 110 + i * 30, 18, i === c.text.length - 1 ? "#7dff6a" : "#d8cbb8", "center", FONT_B, false));
+  button("yes", f.x + 40, f.y + f.h - 86, 200, 60, "Yes!", { style: "green", onClick: () => { const y = c.yes; closeModal(); y(); } });
+  button("no", f.x + f.w - 240, f.y + f.h - 86, 200, 60, "No", { onClick: () => { SFX.click(); closeModal(); } });
+}
+function drawEnding() {
+  const f = modalFrame(Math.min(W - 60, 640), 500, null);
+  const t = T / 30;
+  drawMineral(MINERALS[CORE_MINERAL], f.x + f.w / 2, f.y + 90 + Math.sin(t * 2) * 4, 46, { t });
+  glow(f.x + f.w / 2, f.y + 90, 120, "rgba(255,200,60,0.6)", 0.6);
+  label("THE END", f.x + f.w / 2, f.y + 190, 64, "#ffd447", "center");
+  label("You broke the Core and became the Rock police.", f.x + f.w / 2, f.y + 226, 18, "#d8cbb8", "center", FONT_B, false);
+  const stats = [`Time: ${fmtTime(S.time)}`, `Rocks broken: ${fmt(S.rocks)}`, `Minerals found: ${S.found.filter(n => n > 0).length} / ${MINERALS.length}`, `Gold earned: ${fmt(S.totalGold)}`];
+  stats.forEach((s, i) => label(s, f.x + f.w / 2, f.y + 270 + i * 28, 18, "#cbbca8", "center", FONT_B, false));
+  button("keep", f.x + 40, f.y + f.h - 90, (f.w - 100) / 2, 62, "Keep mining", { onClick: () => { SFX.click(); closeModal(); goLayer(3); } });
+  button("reb", f.x + f.w / 2 + 10, f.y + f.h - 90, (f.w - 100) / 2, 62, `Rebirth x${rebirthMult(S) * 2}`, { style: "green", icon: "rebirth", onClick: () => { closeModal(); doRebirth(); } });
+}
+function drawDialog() {
+  const d = ui.dialog; if (!d) return;
+  const [who, text] = d.lines[d.i];
+  const w = Math.min(760, W - 40), h = 104, x = W / 2 - w / 2 + lay.sceneL / 2, y = lay.hud + 50;
+  const a = anim("dlgA", 1, 0.25);
+  ctx.save(); ctx.globalAlpha = a;
+  panel(x, y, w, h, 18, { top: "#2a2430", bot: "#16121a" });
+  ctx.beginPath(); ctx.arc(x + 56, y + h / 2, 38, 0, TAU); ctx.fillStyle = who === "you" ? "#4a3a24" : "#2a3040"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+  ctx.save(); ctx.beginPath(); ctx.arc(x + 56, y + h / 2, 36, 0, TAU); ctx.clip(); drawHead(who === "you" ? "miner" : "police", x + 56, y + h / 2 + 10, 24, who === "you" ? 1 : -1, T / 30); ctx.restore();
+  label(who === "you" ? "You" : "Rock police", x + 110, y + 34, 20, who === "you" ? "#ffb84a" : "#9ab0ff");
+  ctx.save(); ctx.beginPath(); ctx.rect(x + 108, y, w - 120, h); ctx.clip();
+  label(text.slice(0, Math.floor(d.ch)), x + 110, y + 70, 22, "#ffffff", "left", FONT_B, false);
+  ctx.restore();
+  if (d.ch >= text.length) label("click ▸", x + w - 18, y + h - 14, 14, `rgba(255,255,255,${0.4 + 0.3 * Math.sin(T / 5)})`, "right", FONT_B, false);
+  ctx.restore();
+  reg("dialog", x, y, w, h, nextLine);
+}
+function drawToasts() {
+  const tt = ui.toasts[0]; if (!tt) return;
+  const k = tt.t < 15 ? easeBack(tt.t / 15) : tt.t > 105 ? 1 - easeOut((tt.t - 105) / 15) : 1;
+  const w = 330, h = 72, x = W - (w + 16) * k, y = lay.hud + 6;
+  panel(x, y, w, h, 14, { top: "#4a3c22", bot: "#2a2114", rim: "rgba(255,210,80,0.4)" });
+  drawIcon("trophy", x + 38, y + h / 2, 42, "#ffc21a");
+  label("TROPHY UNLOCKED", x + 70, y + 28, 14, "#ffd447", "left", FONT_B, false);
+  label(tt.a.name, x + 70, y + 54, 22, "#ffffff");
+}
+function drawBanner() {
+  const b = ui.banner; if (!b) return;
+  const k = b.t < 10 ? easeBack(b.t / 10) : b.t > b.max - 15 ? 1 - easeOut((b.t - (b.max - 15)) / 15) : 1;
+  const y = lay.hud + 70 + (ev.rush > 0 || ev.vein > 0 || police.quota ? 40 : 0);
+  const cx = lay.cx;
+  ctx.save(); ctx.globalAlpha = clamp(k, 0, 1); ctx.translate(cx, y); ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
+  label(b.title, 0, 0, 52, b.color, "center");
+  if (b.sub) label(b.sub, 0, 32, 20, "#ffffff", "center", FONT_B);
+  ctx.restore();
+}
 
-  const mx = mouse.x + 240, my = 180 - mouse.y;
-  const hov = indexCellAt(mx, my);
-  for (let i = 0; i < MINERALS.length; i++) {
-    const cx = IDX.gx + (i % IDX.cols) * IDX.cell, cy = IDX.gy + Math.floor(i / IDX.cols) * IDX.rowH;
-    const w = IDX.cell - 4, h = IDX.rowH - 4;
-    roundRect(cx, cy, w, h, 4, i === ui.pick ? "#6a6a6a" : i === hov ? "#525252" : "#2b2b2b", i === ui.pick ? "#fbff00" : "#1b1b1b");
-    const c = C.minerals[i];
-    // draw just the crystal: clip to the cell so his labels don't spill out
-    ctx.save(); ctx.beginPath(); ctx.rect(cx, cy, w, h); ctx.clip();
-    const sz = 95, ox = cx + w / 2 - 240, oy = 180 - (cy + h / 2 + 2);
-    if (S.found[i]) drawCostume(c, ox, oy, sz);
-    else {
-      const sil = silhouette(c, sz);
-      if (sil) ctx.drawImage(sil, 240 + ox - c.cx * sz / 100, 180 - oy - c.cy * sz / 100, c.w * sz / 100, c.h * sz / 100);
-      outlinedText("?", cx + w / 2, cy + h / 2 + 6, "#888", 16, "center");
+// =====================================================================
+// 11. DRAWING THE GAME WORLD
+// =====================================================================
+function drawWorld(t) {
+  const tx = -(mouse.x / W - 0.5) * 50, ty = -(mouse.y / H - 0.5) * 24;
+  game.px += (tx - game.px) * 0.08; game.py += (ty - game.py) * 0.08;
+  ctx.save();
+  if (game.shake) ctx.translate((Math.random() - 0.5) * game.shake * 2, (Math.random() - 0.5) * game.shake * 2);
+  drawCave(S.layer, t, game.px, game.py, lay, ev.vein > 0 ? 1 : 0);
+  const s = lay.s, L = LAYERS[S.layer];
+  // drill
+  if (!L.core) drawDrill(lay.drillX, lay.ground, s, S.drill, t, lay.rockX + lay.R * 0.9);
+  // rock / core
+  if (L.core) {
+    if (!S.coreBroken) {
+      drawCore(lay.rockX, lay.rockY, lay.R, S.coreHP / CORE_HP, t, rock.flash);
+      const bw = lay.R * 2.2, bx = lay.rockX - bw / 2, by = lay.rockY + lay.R + 30;
+      rr(bx, by, bw, 22, 11); ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+      rr(bx + 4, by + 4, (bw - 8) * (S.coreHP / CORE_HP), 14, 7); ctx.fillStyle = "#ff8a2a"; ctx.fill();
+      label(`CORE  ${fmt(S.coreHP)} HP`, lay.rockX, by + 12, 15, "#fff", "center", FONT_T, true, "middle");
+    } else {
+      glow(lay.rockX, lay.rockY, lay.R * 2, "rgba(255,120,30,0.4)", 0.6);
+      ctx.beginPath(); ctx.ellipse(lay.rockX, lay.ground - 6, lay.R * 1.2, lay.R * 0.25, 0, 0, TAU); ctx.fillStyle = "#1a0a04"; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = "#ff8a2a"; ctx.stroke();
+      label("The Core is broken!", lay.rockX, lay.rockY - 20, 28, "#ffd447", "center");
+      label("Rebirth in the shop to rebuild the mine", lay.rockX, lay.rockY + 10, 16, "#d8cbb8", "center", FONT_B);
+    }
+  } else if (rock.pause === 0) {
+    const sq = rock.squash, pop = easeBack(rock.pop);
+    drawRock(lay.rockX, lay.rockY, lay.R * rock.size * pop, ROCK_PAL[S.layer], rock.shape, rock.dmg / rockHP(S), { rot: rock.rot, flash: rock.flash, bright: rock.bright, sx: 1 + sq * 0.06, sy: 1 - sq * 0.06 });
+  }
+  // the miner + the police
+  drawMiner(lay.minerX, lay.ground, s, game.swing, t, game.smear);
+  if (police.state !== "off") drawPolice(police.x, lay.ground, s, police.walk, t, -1, police.state === "stand" && !!ui.dialog);
+  // boulders
+  for (const b of boulders) { drawRock(b.x, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, 0, { rot: b.rot }); if (b.landed && hoverId === null && Math.hypot(mouse.x - b.x, mouse.y - b.y) < b.r * 1.25) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.2, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,220,120,0.8)"; ctx.stroke(); } }
+  // minerals floating up (his clones: up 5 per frame, fading)
+  for (const f of floaters) {
+    const m = MINERALS[f.id], tier = tierOf(m.rarity), k = f.life / f.max;
+    const x = lay.rockX, y = lay.rockY - lay.R * 0.6 - k * 210 - (f.id === CORE_MINERAL ? 60 : 0);
+    const a = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
+    const sz = lay.R * (0.42 + tier * 0.025) * easeBack(Math.min(1, f.life / 6)) * (f.id === CORE_MINERAL ? 2 : 1);
+    ctx.save(); ctx.globalAlpha = a;
+    glow(x, y, sz * (2.2 + tier * 0.25), rarityGlowColor(m.rarity, t), 0.5 + tier * 0.04);
+    if (tier >= 5) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.translate(x, y); ctx.rotate(t * 0.8); ctx.fillStyle = rarityGlowColor(m.rarity, t); ctx.globalAlpha = a * 0.18; for (let i = 0; i < 8; i++) { ctx.rotate(TAU / 8); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sz * 0.3, sz * 4); ctx.lineTo(sz * 0.3, sz * 4); ctx.fill(); } ctx.restore(); }
+    drawMineral(m, x, y, sz, { t });
+    if (tier >= 2) for (let i = 0; i < Math.min(8, tier + 1); i++) star(x + Math.cos(t * 2 + i * 2.4) * sz * 1.5, y + Math.sin(t * 2.6 + i * 1.7) * sz * 1.2, sz * 0.18 * (0.5 + 0.5 * Math.sin(t * 9 + i)), "#ffffff");
+    label("+" + fmt(f.gained), x, y + sz * 0.9 + 26, 24, "#ffd447", "center");
+    if (tier >= 1 || f.isNew) {
+      label(m.name, x, y - sz * 0.95, 18, "#ffffff", "center");
+      label((f.isNew ? "NEW!  " : "") + m.rarity, x, y - sz * 0.95 - 20, 14, rarityColor(m.rarity, t), "center", FONT_B);
     }
     ctx.restore();
   }
-
-  // detail pane on the right
-  const i = ui.pick, m = MINERALS[i], px = 262, pw = 186;
-  roundRect(px, IDX.gy, pw, 260, 6, "#2b2b2b", "#1b1b1b");
-  const known = S.found[i] > 0;
-  if (known) drawCostume(C.minerals[i], px + pw / 2 - 240 - 4, 180 - (IDX.gy + 92), 300);
-  else {
-    const sil = silhouette(C.minerals[i], 300), c = C.minerals[i];
-    if (sil) ctx.drawImage(sil, px + pw / 2 - 4 - c.cx * 3, IDX.gy + 92 - c.cy * 3, c.w * 3, c.h * 3);
-    outlinedText("?", px + pw / 2, IDX.gy + 105, "#999", 40, "center");
-  }
-  const ty = IDX.gy + 190;
-  outlinedText(known ? m.name : "???", px + pw / 2, ty, "#fff", 14, "center");
-  outlinedText(m.rarity, px + pw / 2, ty + 17, m.rarity, 12, "center");
-  outlinedText(`+${fmt(m.gold)} Gold  (x${goldMult(S)} = ${fmt(m.gold * goldMult(S))})`, px + pw / 2, ty + 35, "#fbff00", 10, "center");
-  const ch = CHANCE[i];
-  outlinedText(`Chance: 1 in ${fmt(Math.round(1 / ch))}  (${(ch * 100).toFixed(ch < 0.01 ? 3 : 1)}%)`, px + pw / 2, ty + 50, "#ccc", 10, "center", "normal");
-  outlinedText(`Found: ${fmt(S.found[i])}`, px + pw / 2, ty + 65, "#ccc", 10, "center", "normal");
+  drawParts();
+  drawMotes(lay.lamp, S.layer);
+  drawNear(S.layer, game.px, game.py, lay);
+  drawLighting(S.layer, lay.lamp, t, lay, ev.rush > 0 ? 1 : 0);
+  ctx.restore();
 }
 
 // ---------- title screen ----------
-const titleBtns = [
-  { id: "play", label: "Play", x: 240, y: 222, w: 120, h: 34 },
-  { id: "reset", label: "Reset save", x: 240, y: 264, w: 120, h: 26 },
-];
-let resetArmed = 0;
-let titleT = 0;
-function titleBtnAt() {
-  const mx = mouse.x + 240, my = 180 - mouse.y;
-  return titleBtns.find(b => (b.id !== "reset" || hasProgress()) && Math.abs(mx - b.x) <= b.w / 2 && Math.abs(my - b.y) <= b.h / 2);
-}
-function titlePress() {
-  const b = titleBtnAt();
-  if (!b) return;
-  if (b.id === "play") startGame();
-  if (b.id === "reset") {
-    if (resetArmed > 0) { S = newSave(); save(); resetArmed = 0; play("rockBreak"); }
-    else resetArmed = 120;
-  }
-}
-// a button drawn in his style: white box, thin black border, 3 stacked texts
-function hisButton(b, label, hover) {
-  const s = hover ? 0.93 : 1;
-  const w = b.w * s, h = b.h * s, x = b.x - w / 2, y = b.y - h / 2;
-  ctx.fillStyle = "#fff"; ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
-  ctx.font = `${Math.round(h * 0.62)}px Helvetica, Arial, sans-serif`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  const ty = b.y + 1;
-  ctx.fillStyle = "#bfbfbf"; ctx.fillText(label, b.x, ty + 2);
-  ctx.fillStyle = "#808080"; ctx.fillText(label, b.x, ty + 1);
-  ctx.fillStyle = "#000"; ctx.fillText(label, b.x, ty);
-}
-function drawTitle() {
-  titleT++;
-  drawCostume(C.backdrop, 0, 0);
-  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(0, 0, 480, 360);
-  // a slowly turning rock with crystals popping out of it
-  drawCostume(C.rock[0], 0, 40, 700, 90 + titleT * 0.4);
-  const t = (titleT % 60) / 60, mi = [2, 4, 8, 10, 14, 16][Math.floor(titleT / 60) % 6];
-  drawCostume(C.minerals[mi], 0, 60 + t * 60, 150, 90, 1 - t);
-  outlinedText("Your Average", 240, 52, "#fbff00", 26, "center");
-  outlinedText("Mining Game", 240, 84, "#fbff00", 34, "center");
-  const hov = titleBtnAt();
-  hisButton(titleBtns[0], hasProgress() ? "Continue" : "Play", hov === titleBtns[0]);
+const titleRock = { shape: rockShape(4242) };
+let titleMineral = 0, titleBurstT = -1;
+function drawTitle(t) {
+  lay.sceneL = 0;
+  const tx = -(mouse.x / W - 0.5) * 50, ty = -(mouse.y / H - 0.5) * 24;
+  game.px += (tx - game.px) * 0.08; game.py += (ty - game.py) * 0.08;
+  drawCave(0, t, game.px, game.py, lay, 0);
+  const R = Math.min(110, H * 0.14), rx = W / 2 + 150, ry = lay.ground - R * 0.93, s = R / 95;
+  // demo: the miner swinging at a rock and crystals popping out
+  const cyc = (T % 45) / 45;
+  if (T % 45 === 0 && titleBurstT !== T) { titleBurstT = T; burstChips(rx - R * 0.8, ry, 5, ROCK_PAL[0]); titleMineral = [2, 4, 6, 8, 10, 12, 14, 16][Math.floor(T / 45) % 8]; }
+  drawRock(rx, ry, R, ROCK_PAL[0], titleRock.shape, (T % 225) / 225, { rot: 0.3 });
+  drawMiner(rx - R - 92 * s, lay.ground, s, Math.min(1, cyc * 1.4), t, cyc < 0.1 ? 1 - cyc * 10 : 0);
+  const m = MINERALS[titleMineral];
+  ctx.save(); ctx.globalAlpha = 1 - cyc;
+  glow(rx, ry - R - cyc * 120, 80, rarityGlowColor(m.rarity, t), 0.6);
+  drawMineral(m, rx, ry - R - cyc * 120, 42, { t });
+  ctx.restore();
+  drawParts(); drawMotes([rx - R - 70 * s, lay.ground - 148 * s], 0);
+  drawNear(0, game.px, game.py, lay);
+  drawLighting(0, [W * 0.5, H * 0.45], t, lay, 0);
+  // logo
+  const lx = W / 2, ly = H * 0.2;
+  ctx.save(); ctx.translate(lx, ly + Math.sin(t * 1.2) * 4);
+  label("YOUR AVERAGE", 0, 0, 40, "#d8cbb8", "center");
+  ctx.font = `110px ${FONT_T}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  ctx.lineJoin = "round"; ctx.lineWidth = 22; ctx.strokeStyle = INK; ctx.strokeText("MINING GAME", 0, 104);
+  const g = ctx.createLinearGradient(0, 20, 0, 110); g.addColorStop(0, "#fff2a0"); g.addColorStop(0.5, "#ffc21a"); g.addColorStop(1, "#c86a00");
+  ctx.fillStyle = g; ctx.fillText("MINING GAME", 0, 104);
+  ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.save(); ctx.beginPath(); ctx.rect(-500, 20, 1000, 42); ctx.clip(); ctx.fillText("MINING GAME", 0, 104); ctx.restore();
+  for (let i = 0; i < 4; i++) star(Math.cos(t + i * 1.7) * 330, 60 + Math.sin(t * 1.3 + i) * 50, 12 * (0.5 + 0.5 * Math.sin(t * 3 + i * 2)), "#fff");
+  ctx.restore();
+  // buttons
+  const bx = W / 2 - 360, by = H * 0.46;
+  button("play", bx, by, 280, 76, hasProgress() ? "CONTINUE" : "PLAY", { style: "gold", size: 38, onClick: startGame });
   if (hasProgress()) {
-    if (resetArmed > 0) resetArmed--;
-    hisButton(titleBtns[1], resetArmed > 0 ? "Sure? Click again" : "Reset save", hov === titleBtns[1]);
-    outlinedText(`Gold: ${fmt(S.gold)}   ·   Highscore: ${fmt(S.high)}`, 240, 194, "#fff", 11, "center", "normal");
+    button("reset", bx, by + 92, 280, 52, ui.resetArmed ? "Sure? Click again!" : "Reset save", { style: ui.resetArmed ? "red" : "stone", size: 22, onClick: () => { if (ui.resetArmed) { S = newSave(); save(); ui.resetArmed = 0; playHis("rockBreak"); game.goldShown = 0; } else { ui.resetArmed = 90; SFX.click(); } } });
+    label(`${fmt(S.gold)} Gold  ·  Best ${fmt(S.high)}  ·  ${S.found.filter(n => n > 0).length}/${MINERALS.length} minerals`, bx + 140, by + 176, 16, "#cbbca8", "center", FONT_B);
   }
-  outlinedText("Hold the mouse on the rock to mine. Press Shop for upgrades.", 240, 300, "#ddd", 10, "center", "normal");
-  outlinedText("Rock breaking sound: LordSonny (Pixabay)  ·  Pickaxe sound: CreatorsHome", 240, 322, "#aaa", 9, "center", "normal");
-  outlinedText("A Scratch game by Sixten, remade for the web   ·   M = mute, Esc = menu", 240, 338, "#888", 9, "center", "normal");
+  button("tsnd", bx, by + (hasProgress() ? 196 : 92), 280, 52, "Sound", { icon: settings.muted ? "mute" : "sound", size: 22, onClick: () => { SFX.click(); openModal("sound"); } });
+  label("Hold the mouse on the rock to mine. Buy upgrades in the shop. Dig deeper.", W / 2, H - 58, 17, "#d8cbb8", "center", FONT_B);
+  label("Rock breaking sound: LordSonny (Pixabay)  ·  Pickaxe sound: CreatorsHome  ·  A game by Sixten", W / 2, H - 30, 14, "#9a8c7c", "center", FONT_B, false);
+  if (ui.modal === "sound") drawSound();
 }
 function startGame() {
-  screen = "game";
-  ui.shop = false; ui.index = false; ui.high = false;
-  schedulePolice();
+  initAudio(); SFX.click();
+  ui.fadeTo = 1;
+  setTimeout(() => {
+    screen = "game"; ui.fadeTo = 0; ui.modal = null;
+    music.layer = S.layer; caveCache = null;
+    introAt = S.time + randInt(1, 10);
+    computeLayout();
+  }, 300);
 }
+function goTitle() { save(); ui.fadeTo = 1; setTimeout(() => { screen = "title"; ui.fadeTo = 0; ui.modal = null; ui.shop = false; ui.dialog = null; police.state = "off"; police.quota = null; music.layer = 0; caveCache = null; }, 300); }
 
-// ---------- main loop ----------
+// =====================================================================
+// 12. MAIN LOOP
+// =====================================================================
 let last = performance.now(), acc = 0;
 function frame(now) {
-  acc += Math.min(0.25, (now - last) / 1000);
-  last = now;
-  while (acc >= DT) { acc -= DT; if (screen === "game") tick(); }
-  ctx.setTransform(view, 0, 0, view, 0, 0);
+  acc += Math.min(0.25, (now - last) / 1000); last = now;
+  computeLayout();
+  while (acc >= DT) { acc -= DT; tick(); }
+  musicTick();
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
   ctx.imageSmoothingEnabled = true;
-  ctx.clearRect(0, 0, 480, 360);
-  ctx.fillStyle = "#5f5f5f"; ctx.fillRect(0, 0, 480, 360);
-  if (screen === "title") drawTitle(); else drawGame();
+  regions = [];
+  const t = T / 30;
+  if (screen === "title") drawTitle(t);
+  else {
+    drawWorld(t);
+    drawShop();
+    drawHUD();
+    drawDialog();
+    drawBanner();
+    drawToasts();
+    if (ui.layerCard > 0) {
+      const k = ui.layerCard > 95 ? easeBack((110 - ui.layerCard) / 15) : ui.layerCard < 20 ? ui.layerCard / 20 : 1;
+      ctx.save(); ctx.globalAlpha = clamp(k, 0, 1);
+      label(`DEPTH ${S.layer + 1}`, lay.cx, H * 0.38, 26, "#cbbca8", "center");
+      label(LAYERS[S.layer].name.toUpperCase(), lay.cx, H * 0.38 + 62, 64, "#ffd447", "center");
+      ctx.restore();
+    }
+    if (ui.modal === "index") drawIndex();
+    else if (ui.modal === "ach") drawAch();
+    else if (ui.modal === "sound") drawSound();
+    else if (ui.modal === "confirm") drawConfirm();
+    else if (ui.modal === "ending") drawEnding();
+  }
+  if (ui.flash) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = clamp(ui.flash.a, 0, 1); ctx.fillStyle = ui.flash.c; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+  // fades: screen changes + going up/down a layer
+  ui.fade += (ui.fadeTo - ui.fade) * 0.2;
+  let dark = ui.fade;
+  if (ui.trans) dark = Math.max(dark, ui.trans.t < 14 ? ui.trans.t / 14 : 1 - (ui.trans.t - 14) / 14);
+  if (dark > 0.005) { ctx.fillStyle = `rgba(0,0,0,${clamp(dark, 0, 1)})`; ctx.fillRect(0, 0, W, H); }
+  const r = regionAt(mouse.x, mouse.y);
+  hoverId = r && r.fn ? r.id : null;
+  canvas.style.cursor = hoverId ? "pointer" : (screen === "game" && overRock() && !ui.modal ? "crosshair" : "default");
   requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);
+// wait (briefly) for the game fonts, then start
+function boot() { requestAnimationFrame(frame); }
+try { if (document.fonts && document.fonts.load) Promise.race([Promise.all([document.fonts.load(`40px "Lilita One"`), document.fonts.load(`800 20px "Nunito"`)]), new Promise(r => setTimeout(r, 1500))]).then(boot, boot); else boot(); } catch (e) { boot(); }
 </script>
 </body>
 </html>
