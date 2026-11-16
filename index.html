@@ -55,6 +55,7 @@ const LAYERS = [
   { name: "Magma Depths",  hp: 12, cost: 2e10 },
   { name: "The Void",      hp: 16, cost: 2e13 },
   { name: "The Core",      hp: 0,  cost: 1e15, core: true },
+  { name: "The Deep Heart", hp: 20, cost: 5e16 },          // below the Core: only after it is broken
 ];
 const CORE_HP = 80000;
 
@@ -116,10 +117,23 @@ const MINERALS = [
   { layer: 3, name: "Adminium block",    d: 12000, gold: 750000000000,  rarity: "Admin",        color: "#e0e0e0" },
   // --- The Core (only one, from breaking the Core) ---
   { layer: 4, name: "Core crystal",        d: -1,    gold: 10000000000000,         rarity: "Admin",        color: "#ffcc33" },
+  // --- The Deep Heart (below the Core). Added after the Core crystal so old saves keep their counts. ---
+  { layer: 5, name: "Heartstone",          d: 0,     gold: 20000000,        rarity: "Common",    color: "#6a2030" },
+  { layer: 5, name: "Pulsium shard",       d: 3,     gold: 80000000,        rarity: "Uncommon",  color: "#ff6a8a" },
+  { layer: 5, name: "Veinium ore",         d: 6,     gold: 200000000,       rarity: "Rare",      color: "#c01040" },
+  { layer: 5, name: "Glowheart gem",       d: 12,    gold: 600000000,       rarity: "Epic",      color: "#ff3a7a" },
+  { layer: 5, name: "Beatium nugget",      d: 25,    gold: 2000000000,      rarity: "Legendary", color: "#ffb0c0" },
+  { layer: 5, name: "Crimsonite",          d: 60,    gold: 10000000000,     rarity: "Mythical",  color: "#a00020" },
+  { layer: 5, name: "Lifeblood orb",       d: 150,   gold: 40000000000,     rarity: "Angelic",   color: "#ff2040" },
+  { layer: 5, name: "Heartrock cube",      d: 400,   gold: 200000000000,    rarity: "Celestial", color: "#d04060" },
+  { layer: 5, name: "Corelight prism",     d: 1200,  gold: 1000000000000,   rarity: "Exotic",    color: "#ffd0e0" },
+  { layer: 5, name: "Chief's badge",       d: 4000,  gold: 5000000000000,   rarity: "Secret",    color: "#ffcf3a" },
+  { layer: 5, name: "Heartcore block",     d: 15000, gold: 30000000000000,  rarity: "Admin",     color: "#ff0050" },
 ];
 MINERALS.forEach((m, i) => { m.id = i; if (!m.costume) m.costume = "new/mineral_" + m.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".svg"; });
 const LAYER_MINERALS = LAYERS.map((_, L) => MINERALS.filter(m => m.layer === L));
-const CORE_MINERAL = MINERALS.length - 1;
+const CORE_MINERAL = MINERALS.findIndex(m => m.layer === 4);
+const BADGE_MINERAL = MINERALS.findIndex(m => m.name === "Chief's badge");
 
 function fmtPct(c) {
   const v = c * 100;
@@ -162,6 +176,7 @@ const UPG = {
     { cost: 1000, v: 20 }, { cost: 2500, v: 50 }, { cost: 10000, v: 100 },
     { cost: 5e7, v: 250, depth: 1 }, { cost: 3e10, v: 500, depth: 2 },
     { cost: 1e13, v: 1000, depth: 3 }, { cost: 5e14, v: 2500, depth: 3 },
+    { cost: 2e17, v: 5000, depth: 5 },
   ],
   speed: [ // Upgrades 2  (mining = swing half-time, breaking = wait between hits)
     { cost: 50, mining: 0.45, breaking: 0.9 }, { cost: 100, mining: 0.375, breaking: 0.75 },
@@ -175,6 +190,7 @@ const UPG = {
     { cost: 3e11, v: 5000000, depth: 2, label: "Drill MK 7" },
     { cost: 1e13, v: 500000000, depth: 3, label: "Drill MK 8" },
     { cost: 3e14, v: 20000000000, depth: 3, label: "Drill MK 9" },
+    { cost: 1e17, v: 2000000000000, depth: 5, label: "Drill MK 10" },
   ],
   pick: [ // pickaxe power = rock damage per hit
     { cost: 1e7, v: 2, depth: 1, label: "Iron pickaxe" },
@@ -182,6 +198,7 @@ const UPG = {
     { cost: 5e9, v: 4, depth: 2, label: "Gold pickaxe" },
     { cost: 3e12, v: 5, depth: 3, label: "Diamond pickaxe" },
     { cost: 1e15, v: 7, depth: 3, label: "Rektium pickaxe" },
+    { cost: 3e17, v: 9, depth: 5, label: "Heart pickaxe" },
   ],
   crit: [ // chance for a hit to do 4x damage
     { cost: 2e8, v: 0.1, depth: 1, label: "Sharp eye I" },
@@ -194,12 +211,14 @@ const UPG = {
     { cost: 1e10, v: 3, depth: 2, label: "Lucky charm II" },
     { cost: 5e12, v: 4, depth: 3, label: "Lucky charm III" },
     { cost: 3e14, v: 5, depth: 3, label: "Lucky charm IV" },
+    { cost: 2e17, v: 6, depth: 5, label: "Lucky charm V" },
   ],
   helper: [ // mini miners that hit the rock on their own (hits per second, all together)
     { cost: 2e7, v: 1, depth: 1, label: "Mini miner I" },
     { cost: 5e9, v: 2, depth: 2, label: "Mini miner II" },
     { cost: 3e12, v: 4, depth: 3, label: "Mini miner III" },
     { cost: 5e14, v: 8, depth: 3, label: "Mini miner IV" },
+    { cost: 2e17, v: 16, depth: 5, label: "Mini miner V" },
   ],
   event: [ // events last longer and come more often
     { cost: 3e8, v: 1, depth: 1, label: "Lucky lantern I" },
@@ -211,6 +230,7 @@ const UPG = {
     { cost: 2e11, v: 2, depth: 2, label: "Heat suit", sub: "x2 gold in the Magma Depths" },
     { cost: 1e14, v: 3, depth: 3, label: "Void goggles", sub: "x2 gold + 1 luck roll in The Void" },
     { cost: 3e14, v: 4, depth: 3, label: "Core gloves", sub: "x2 damage on The Core" },
+    { cost: 1e17, v: 5, depth: 5, label: "Heart charm", sub: "x2 gold in The Deep Heart" },
   ],
 };
 const UPG_KEYS = Object.keys(UPG);
@@ -225,6 +245,8 @@ const BOSSES = [null,
   { name: "The Big Basalt", hpMul: 12, skin: "frost" },
   { name: "Magma King",     hpMul: 12, skin: "magma" },
   { name: "The Void Eye",   hpMul: 12, skin: "void" },
+  null,                                                   // the Core is its own boss
+  { name: "The Heart Guardian", hpMul: 12, skin: "heart" },
 ];
 // ---- Rebirth perks, bought with Rebirth stars (3 per rebirth) ----
 const STARS_PER_REBIRTH = 3;
@@ -243,7 +265,8 @@ function newSave() {
     v: 3, gold: 0, high: 0, layer: 0, maxLayer: 0, coreHP: CORE_HP, coreBroken: false, rebirths: 0,
     found: new Array(MINERALS.length).fill(0), rocks: 0, police: false, quotas: 0,
     ach: {}, time: 0, totalGold: 0, boulders: 0, ended: false,
-    depthRocks: [0, 0, 0, 0, 0], bossKills: [0, 0, 0, 0, 0], bossNext: -1, bossActive: -1,
+    depthRocks: [0, 0, 0, 0, 0, 0], bossKills: [0, 0, 0, 0, 0, 0], bossNext: -1, bossActive: -1,
+    museum: [], heists: 0, thiefCaught: 0, chiefMet: false, doubles: 0,
     stars: 0, perks: {}, badges: 0, quests: [], questsDone: 0, skins: { classic: true }, skin: "classic",
     meteors: 0, crits: 0, tierFinds: new Array(RARITIES.length).fill(0),
   };
@@ -254,7 +277,15 @@ const perk = (s, id) => (s.perks && s.perks[id]) || 0;
 const lvl = (s, k) => s[k] === 0 ? null : UPG[k][s[k] - 1];
 function goldMult(s)  { const u = lvl(s, "mult"); return u ? u.v : 1; }
 function rebirthMult(s) { return Math.pow(2, s.rebirths) * (1 + 0.5 * perk(s, "golden")); }
-function gearMult(s, layer) { return (s.gear >= 1 && layer === 1) || (s.gear >= 2 && layer === 2) || (s.gear >= 3 && layer === 3) ? 2 : 1; }
+function gearMult(s, layer) { return (s.gear >= 1 && layer === 1) || (s.gear >= 2 && layer === 2) || (s.gear >= 3 && layer === 3) || (s.gear >= 5 && layer === 5) ? 2 : 1; }
+// Museum: every mineral on display adds 1.5% gold per rarity step (Common 0%, Admin +18%)
+const MUSEUM_SLOTS = 6;
+function museumSlots(s) { return Math.min(MUSEUM_SLOTS, 2 + s.maxLayer); }
+function museumMult(s) {
+  let b = 0; const seen = {};
+  for (const id of s.museum.slice(0, museumSlots(s))) { if (MINERALS[id] && s.found[id] > 0 && !seen[id]) { seen[id] = 1; b += tierOf(MINERALS[id].rarity) * 0.015; } }
+  return 1 + b;
+}
 function speedOf(s)   { return lvl(s, "speed") || BASE_SPEED; }
 function pickPower(s) { const u = lvl(s, "pick"); return (u ? u.v : 1) + perk(s, "power"); }
 function critChance(s) { const u = lvl(s, "crit"); return u ? u.v : 0; }
@@ -265,7 +296,11 @@ function drillPPS(s)  { let t = 0; for (let i = 0; i < s.drill; i++) t += UPG.dr
 function hitInterval(s) { return speedOf(s).breaking + DT; }
 function tierLocked(s, k) { const n = UPG[k][s[k]]; return !!(n && (n.depth || 0) > s.maxLayer); }
 function nextCost(s, k) {
-  if (k === "dig") return s.maxLayer + 1 < LAYERS.length ? LAYERS[s.maxLayer + 1].cost * (1 - 0.25 * perk(s, "dig")) : Infinity;
+  if (k === "dig") {
+    if (s.maxLayer + 1 >= LAYERS.length) return Infinity;
+    if (LAYERS[s.maxLayer].core && !s.coreBroken) return Infinity;   // break the Core before digging past it
+    return LAYERS[s.maxLayer + 1].cost * (1 - 0.25 * perk(s, "dig"));
+  }
   if (s[k] >= UPG[k].length || tierLocked(s, k)) return Infinity;
   return UPG[k][s[k]].cost;
 }
@@ -289,7 +324,7 @@ function hitDamage(s, rand, frenzy) {
   return { d, crit };
 }
 // payout for a mineral right now
-function payout(s, id, rush) { return MINERALS[id].gold * goldMult(s) * rebirthMult(s) * gearMult(s, MINERALS[id].layer) * (rush ? RUSH_MULT : 1); }
+function payout(s, id, rush) { return MINERALS[id].gold * goldMult(s) * rebirthMult(s) * gearMult(s, MINERALS[id].layer) * museumMult(s) * (rush ? RUSH_MULT : 1); }
 function noteFind(s, id) { s.found[id]++; s.tierFinds[tierOf(MINERALS[id].rarity)]++; }
 function breakRock(s, rand, opts = {}) {
   const id = rollMineral(s.layer, luckRolls(s) + (opts.vein ? 2 : 0), rand);
@@ -297,7 +332,7 @@ function breakRock(s, rand, opts = {}) {
   noteFind(s, id);
   s.rocks++;
   s.depthRocks[s.layer]++;
-  if (s.layer >= 1 && s.layer <= 3 && s.depthRocks[s.layer] % BOSS_EVERY === 0) s.bossNext = s.layer;
+  if (BOSSES[s.layer] && s.depthRocks[s.layer] % BOSS_EVERY === 0) s.bossNext = s.layer;
   return id;
 }
 // boss loot: 5 minerals rolled with +3 luck
@@ -314,6 +349,7 @@ function rebirth(s) {
     totalGold: s.totalGold, boulders: s.boulders, rocks: s.rocks, ended: s.ended, bossKills: s.bossKills,
     stars: s.stars + STARS_PER_REBIRTH, perks: s.perks, badges: s.badges, quests: s.quests, questsDone: s.questsDone,
     skins: s.skins, skin: s.skin, meteors: s.meteors, crits: s.crits, tierFinds: s.tierFinds,
+    museum: s.museum, heists: s.heists, thiefCaught: s.thiefCaught, chiefMet: s.chiefMet, doubles: s.doubles,
   };
   const n = Object.assign(newSave(), keep);
   applyStartPerks(n);
@@ -493,13 +529,13 @@ function mineralSprite(m, s, sil) {
   minSprites.set(key, e);
   return e;
 }
+// A mineral = his costume (or a new one in his style). s = about its size; picture scale = s / 13.
 function drawMineral(m, x, y, s, opts = {}) {
   if (!(s > 0.3)) return;
-  if (GFX.canSprite && s * devScale() < 300) {
-    const e = mineralSprite(m, s, !!opts.sil), k = s / e.s;
-    ctx.drawImage(e.c, x - (e.left + 1 / devScale()) * k, y - (e.top + 1 / devScale()) * k, e.w * k, e.h * k);
-  } else drawMineralBody(m, x, y, s, opts.sil);
-  if (!opts.sil) drawMineralExtras(m, x, y, s, opts.t || 0);
+  const a = mineralArt(m), k = s / 13;
+  if (opts.sil) { drawSvg(a.img, a.w, a.h, a.cx, a.cy, x, y, k, true); return; }
+  if (!drawSvg(a.img, a.w, a.h, a.cx, a.cy, x, y, k)) return;   // still loading: show nothing for a moment
+  drawMineralExtras(m, x, y - s * 0.3, s * 0.8, opts.t || 0);  // sparkles on top
 }
 function drawMineralBody(m, x, y, s, sil) {
   const v = visOf(m), g = v.geo;
@@ -671,6 +707,234 @@ function glow(x, y, r, color, alpha = 1) {
   ctx.restore();
 }
 
+// =====================================================================
+// HIS ART — Sixten's own Scratch drawings, used exactly as he drew them
+// (same shapes, colours and line widths). Glows, sparkles and particles
+// are only ADDED on top. New things are drawn in the same flat style.
+// =====================================================================
+// his rock (5 crack stages), his miner (2 swing costumes), his Rock police (2 walk costumes)
+const HIS = {"rock":["<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"13.7174\" height=\"13.7174\" viewBox=\"0,0,13.7174,13.7174\"><g transform=\"translate(-233.1413,-173.1413)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M233.3913,180c0,-3.64988 2.95881,-6.6087 6.6087,-6.6087c3.64988,0 6.6087,2.95881 6.6087,6.6087c0,3.64988 -2.95881,6.6087 -6.6087,6.6087c-3.64988,0 -6.6087,-2.95881 -6.6087,-6.6087z\" fill=\"#525252\" stroke=\"#000000\" stroke-width=\"0.5\"/><path d=\"M242.34375,177.875c0,1.96751 -1.72091,3.5625 -3.84375,3.5625c-2.12284,0 -3.84375,-1.59499 -3.84375,-3.5625c0,-1.96751 1.72091,-3.5625 3.84375,-3.5625c2.12284,0 3.84375,1.59499 3.84375,3.5625z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\"/><path d=\"M246.21875,180.625c0,0.93198 -0.57364,1.6875 -1.28125,1.6875c-0.70761,0 -1.28125,-0.75552 -1.28125,-1.6875c0,-0.93198 0.57364,-1.6875 1.28125,-1.6875c0.70761,0 1.28125,0.75552 1.28125,1.6875z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\"/><path d=\"M242.90625,182.59375c0,1.39797 -1.14727,2.53125 -2.5625,2.53125c-1.41523,0 -2.5625,-1.13328 -2.5625,-2.53125c0,-1.39797 1.14727,-2.53125 2.5625,-2.53125c1.41523,0 2.5625,1.13328 2.5625,2.53125z\" fill=\"#484848\" stroke=\"none\" stroke-width=\"0\"/></g></g></svg>","<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"13.7174\" height=\"13.7174\" viewBox=\"0,0,13.7174,13.7174\"><g transform=\"translate(-233.1413,-173.1413)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M233.3913,180c0,-3.64988 2.95881,-6.6087 6.6087,-6.6087c3.64988,0 6.6087,2.95881 6.6087,6.6087c0,3.64988 -2.95881,6.6087 -6.6087,6.6087c-3.64988,0 -6.6087,-2.95881 -6.6087,-6.6087z\" fill=\"#525252\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"butt\"/><path d=\"M242.34376,177.87501c0,1.96751 -1.7209,3.5625 -3.84375,3.5625c-2.12285,0 -3.84375,-1.59499 -3.84375,-3.5625c0,-1.96751 1.7209,-3.5625 3.84375,-3.5625c2.12285,0 3.84375,1.59499 3.84375,3.5625z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M246.21876,180.62501c0,0.93198 -0.57363,1.6875 -1.28125,1.6875c-0.70762,0 -1.28125,-0.75552 -1.28125,-1.6875c0,-0.93198 0.57363,-1.6875 1.28125,-1.6875c0.70762,0 1.28125,0.75552 1.28125,1.6875z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M242.90626,182.59376c0,1.39797 -1.14727,2.53125 -2.5625,2.53125c-1.41523,0 -2.5625,-1.13328 -2.5625,-2.53125c0,-1.39797 1.14727,-2.53125 2.5625,-2.53125c1.41523,0 2.5625,1.13328 2.5625,2.53125z\" fill=\"#484848\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M236.84782,175.78261l-0.91304,-0.95652\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M245.80435,177.34783l-1.52174,0.78261\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M244.93478,178.86957l-0.04348,-1\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M235.23913,184.30435l1.08696,-1.6087\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M243.19565,184.43478l-0.30435,1.26087l-0.91304,-0.73913\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/></g></g></svg>","<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"13.7174\" height=\"13.7174\" viewBox=\"0,0,13.7174,13.7174\"><g transform=\"translate(-233.1413,-173.1413)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M233.3913,180c0,-3.64988 2.95881,-6.6087 6.6087,-6.6087c3.64988,0 6.6087,2.95881 6.6087,6.6087c0,3.64988 -2.95881,6.6087 -6.6087,6.6087c-3.64988,0 -6.6087,-2.95881 -6.6087,-6.6087z\" fill=\"#525252\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"butt\"/><path d=\"M242.34376,177.87501c0,1.96751 -1.7209,3.5625 -3.84375,3.5625c-2.12285,0 -3.84375,-1.59499 -3.84375,-3.5625c0,-1.96751 1.7209,-3.5625 3.84375,-3.5625c2.12285,0 3.84375,1.59499 3.84375,3.5625z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M246.21876,180.62501c0,0.93198 -0.57363,1.6875 -1.28125,1.6875c-0.70762,0 -1.28125,-0.75552 -1.28125,-1.6875c0,-0.93198 0.57363,-1.6875 1.28125,-1.6875c0.70762,0 1.28125,0.75552 1.28125,1.6875z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M242.90626,182.59376c0,1.39797 -1.14727,2.53125 -2.5625,2.53125c-1.41523,0 -2.5625,-1.13328 -2.5625,-2.53125c0,-1.39797 1.14727,-2.53125 2.5625,-2.53125c1.41523,0 2.5625,1.13328 2.5625,2.53125z\" fill=\"#484848\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M235.93478,174.82609l0.91304,0.95652l-0.26087,1.47826\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M245.80435,177.34783l-1.52174,0.78261\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M243.5,176.86956l1.3913,1.00001l0.04348,1\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M236.36956,181.13043l-0.04347,1.56522l-1.08696,1.6087\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M243.54347,183.56521l-0.34782,0.86957l-0.30435,1.26087l-0.91304,-0.73913l-1,-0.13044\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M236.80435,175.73913l0.86957,-0.08696\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M236.32609,182.65217l1.21739,-0.04348\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M242.8913,184.73913l-0.91304,-1.17391\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M241.63043,173.73913l-0.78261,1.21739\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M233.5,180.17391l0.95652,-0.04348\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M244.67392,182.3913l0.69565,1.26087\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/></g></g></svg>","<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"13.7174\" height=\"13.7174\" viewBox=\"0,0,13.7174,13.7174\"><g transform=\"translate(-233.14131,-173.14131)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M233.39132,180.00002c0,-3.64988 2.95881,-6.6087 6.6087,-6.6087c3.64988,0 6.6087,2.95881 6.6087,6.6087c0,3.64988 -2.95881,6.6087 -6.6087,6.6087c-3.64988,0 -6.6087,-2.95881 -6.6087,-6.6087z\" fill=\"#525252\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"butt\"/><path d=\"M242.34376,177.87501c0,1.96751 -1.7209,3.5625 -3.84375,3.5625c-2.12285,0 -3.84375,-1.59499 -3.84375,-3.5625c0,-1.96751 1.7209,-3.5625 3.84375,-3.5625c2.12285,0 3.84375,1.59499 3.84375,3.5625z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M246.21876,180.62501c0,0.93198 -0.57363,1.6875 -1.28125,1.6875c-0.70762,0 -1.28125,-0.75552 -1.28125,-1.6875c0,-0.93198 0.57363,-1.6875 1.28125,-1.6875c0.70762,0 1.28125,0.75552 1.28125,1.6875z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M242.90626,182.59376c0,1.39797 -1.14727,2.53125 -2.5625,2.53125c-1.41523,0 -2.5625,-1.13328 -2.5625,-2.53125c0,-1.39797 1.14727,-2.53125 2.5625,-2.53125c1.41523,0 2.5625,1.13328 2.5625,2.53125z\" fill=\"#484848\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M238.32609,177.8261l-1.73913,-0.56521l0.26087,-1.47826l-0.91304,-0.95652\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M244.28263,178.13046l1.52174,-0.78261\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M242.63044,178.13045l0.86957,-1.26087l1.3913,1.00001l0.04348,1\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M236.36958,181.13044l-0.04347,1.56522l-1.08696,1.6087\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M243.54348,183.56523l-0.34782,0.86957l-0.30435,1.26087l-0.91304,-0.73913l-1,-0.13044l-0.82609,-0.78261\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M238.9348,174.60871l-1.26086,1.04348l-0.86957,0.08696\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M238.36957,181.00001l-0.82608,1.6087l-1.21739,0.04348\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M242.89132,184.73914l-0.91304,-1.17391l0.65217,-2.2174\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M241.63044,173.73914l-0.78261,1.21739l0.43479,1.65217l-0.95652,1.30435\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M235.89132,178.69566l-1.43478,1.43479l-0.95652,0.04348\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M245.36959,183.65219l-0.69565,-1.26087\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M238.23913,186.08697v-1.86956l1.65217,-1.86956\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M246.28262,180.69566l-1.86956,0.2174\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/></g></g></svg>","<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"13.7174\" height=\"13.7174\" viewBox=\"0,0,13.7174,13.7174\"><g transform=\"translate(-233.14134,-173.14134)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M233.39135,180.00005c0,-3.64988 2.95881,-6.6087 6.6087,-6.6087c3.64988,0 6.6087,2.95881 6.6087,6.6087c0,3.64988 -2.95881,6.6087 -6.6087,6.6087c-3.64988,0 -6.6087,-2.95881 -6.6087,-6.6087z\" fill=\"#525252\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"butt\"/><path d=\"M242.34376,177.87501c0,1.96751 -1.7209,3.5625 -3.84375,3.5625c-2.12285,0 -3.84375,-1.59499 -3.84375,-3.5625c0,-1.96751 1.7209,-3.5625 3.84375,-3.5625c2.12285,0 3.84375,1.59499 3.84375,3.5625z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M246.21876,180.62501c0,0.93198 -0.57363,1.6875 -1.28125,1.6875c-0.70762,0 -1.28125,-0.75552 -1.28125,-1.6875c0,-0.93198 0.57363,-1.6875 1.28125,-1.6875c0.70762,0 1.28125,0.75552 1.28125,1.6875z\" fill=\"#434343\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M242.90626,182.59376c0,1.39797 -1.14727,2.53125 -2.5625,2.53125c-1.41523,0 -2.5625,-1.13328 -2.5625,-2.53125c0,-1.39797 1.14727,-2.53125 2.5625,-2.53125c1.41523,0 2.5625,1.13328 2.5625,2.53125z\" fill=\"#484848\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"butt\"/><path d=\"M246.28264,180.69568l-1.86956,0.2174l-0.13043,-2.7826l1.52174,-0.78261\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M240.45653,177.95653l2.17392,0.17392l0.86957,-1.26087l1.3913,1.00001l0.04348,1\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M243.54348,183.56524l-0.34782,0.86957l-0.30435,1.26087l-0.91304,-0.73913l-1,-0.13044l-0.82609,-0.78261\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M235.93483,174.82613l0.91304,0.95652l-0.26087,1.47826l1.73913,0.56521l1.08695,2.21738l-1.04347,0.95653l-0.82608,1.6087l-1.21739,0.04348\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M233.50005,180.17394l0.95652,-0.04348l1.43478,-1.43479l0.47826,2.43479l-0.04347,1.56522l-1.08696,1.6087\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M242.89134,184.73918l-0.91304,-1.17391l0.65217,-2.2174l2.04349,1.04348l0.69565,1.26087\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M238.63043,180.73914l1.26087,1.60873l-1.65217,1.86956v1.86956\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M242.67394,181.26088l-4.13043,-3.13043l1.78263,-0.21738l0.95652,-1.30435l-0.43479,-1.65217l0.78261,-1.21739\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M236.58698,185.43479l0.21739,-0.73913\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M234.84783,177.00001l-0.52174,-0.17391\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M239.89132,173.52176l-0.08696,1l-0.86953,0.08698l-1.26086,1.04348l-0.86957,0.08696\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M243.93478,174.91306l-1.13043,0.86957\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M244.23914,179.26088h-0.86957\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M240.23913,186.30436l-0.69565,-1.3913\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M235.80436,178.73913l0.86957,-1.43478\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/><path d=\"M241.63043,178.17392l-0.26087,2l-1.43478,2.08696\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linecap=\"round\"/></g></g></svg>"],"player":[{"text":"<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"14.53972\" height=\"23.28985\" viewBox=\"0,0,14.53972,23.28985\"><g transform=\"translate(-235.72372,-164.96016)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-width=\"0.5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M239.97372,180.10527l-4,7.89473\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M243.97372,188l-4,-7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M240.00005,180.26316v-7.94737\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M240.00005,172.34211l-4,7.89473\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M240.00005,172.34211l4,7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M237.18424,169.5c0,-1.55512 1.26067,-2.81579 2.81579,-2.81579c1.55512,0 2.81579,1.26067 2.81579,2.81579c0,1.55512 -1.26067,2.81579 -2.81579,2.81579c-1.55512,0 -2.81579,-1.26067 -2.81579,-2.81579z\" fill=\"#ffffff\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M241.21056,169.26316c0,-0.27614 0.22386,-0.5 0.5,-0.5c0.27614,0 0.5,0.22386 0.5,0.5c0,0.27614 -0.22386,0.5 -0.5,0.5c-0.27614,0 -0.5,-0.22386 -0.5,-0.5z\" fill=\"#000000\" stroke=\"none\" stroke-linecap=\"butt\"/><path d=\"M236.84219,168.26316c0,0 0.07951,-3.09172 3.15789,-3.05264c3.03694,0.03856 3.15789,3.05264 3.15789,3.05264z\" fill=\"#ff9b00\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M240.02637,168.1579v-2.84211\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M243.1847,180.82981l4.43025,-4.64789\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M244.28873,174.09698c0,0 3.22355,0.38739 4.14422,1.26494c0.95242,0.90782 1.43156,4.20023 1.43156,4.20023c0,0 -1.53224,-2.18759 -2.48465,-3.09541c-0.95877,-0.91387 -3.24902,-2.36977 -3.24902,-2.36977z\" fill=\"#7b7b7b\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M243.4131,180.01532c0,-0.27614 0.22386,-0.5 0.5,-0.5c0.27614,0 0.5,0.22386 0.5,0.5c0,0.27614 -0.22386,0.5 -0.5,0.5c-0.27614,0 -0.5,-0.22386 -0.5,-0.5z\" fill=\"#000000\" stroke=\"#000000\" stroke-linecap=\"butt\"/></g></g></svg>","w":14.53972,"h":23.28985},{"text":"<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"17.30133\" height=\"23.28985\" viewBox=\"0,0,17.30133,23.28985\"><g transform=\"translate(-235.72376,-164.96017)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-width=\"0.5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M247.97711,166.64764l0.60584,6.39241\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M244.11867,167.91207c0,0 2.50916,-2.29964 3.77539,-2.41964c1.30989,-0.12415 4.11033,1.67228 4.11033,1.67228c0,0 -2.65643,-0.2769 -3.96632,-0.15277c-1.31863,0.12498 -3.9194,0.90013 -3.9194,0.90013z\" fill=\"#7b7b7b\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M248.90304,171.94047l-8.82794,0.62783\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M239.97377,180.10528l-4,7.89473\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M243.97377,188.00001l-4,-7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M240.0001,180.26317v-7.94737\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M236.0001,180.23685l4,-7.89473\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M237.18429,169.50001c0,-1.55512 1.26067,-2.81579 2.81579,-2.81579c1.55512,0 2.81579,1.26067 2.81579,2.81579c0,1.55512 -1.26067,2.81579 -2.81579,2.81579c-1.55512,0 -2.81579,-1.26067 -2.81579,-2.81579z\" fill=\"#ffffff\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M241.21061,169.26317c0,-0.27614 0.22386,-0.5 0.5,-0.5c0.27614,0 0.5,0.22386 0.5,0.5c0,0.27614 -0.22386,0.5 -0.5,0.5c-0.27614,0 -0.5,-0.22386 -0.5,-0.5z\" fill=\"#000000\" stroke=\"none\" stroke-linecap=\"butt\"/><path d=\"M236.84216,168.26317c0,0 0.07951,-3.09172 3.15789,-3.05264c3.03694,0.03856 3.15789,3.05264 3.15789,3.05264z\" fill=\"#ff9b00\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M240.02642,168.15791v-2.84211\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M247.99599,171.8509c0,-0.27614 0.22386,-0.5 0.5,-0.5c0.27614,0 0.5,0.22386 0.5,0.5c0,0.27614 -0.22386,0.5 -0.5,0.5c-0.27614,0 -0.5,-0.22386 -0.5,-0.5z\" fill=\"#000000\" stroke=\"#000000\" stroke-linecap=\"butt\"/></g></g></svg>","w":17.30133,"h":23.28985}],"police":[{"text":"<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"8.52633\" height=\"23.15778\" viewBox=\"0,0,8.52633,23.15778\"><g transform=\"translate(-247.65961,-165.70143)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-width=\"0.5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M255.93594,188.60921l-4,-7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M251.93594,180.71448l-4,7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M251.90961,180.87237v-7.94737\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M255.90961,180.84605l-4,-7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M251.90961,172.95132l-4,7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M251.90963,172.925c-1.55512,0 -2.81579,-1.26067 -2.81579,-2.81579c0,-1.55512 1.26067,-2.81579 2.81579,-2.81579c1.55512,0 2.81579,1.26067 2.81579,2.81579c0,1.55512 -1.26067,2.81579 -2.81579,2.81579z\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"#ffffff\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M250.1991,170.37237c-0.27614,0 -0.5,-0.22386 -0.5,-0.5c0,-0.27614 0.22386,-0.5 0.5,-0.5c0.27614,0 0.5,0.22386 0.5,0.5c0,0.27614 -0.22386,0.5 -0.5,0.5z\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"#000000\" stroke=\"none\" stroke-linecap=\"butt\"/><path d=\"M248.71375,169.40119v-1.60593c0,0 2.13726,-1.84384 3.20389,-1.84384c1.06395,0 3.18784,1.84384 3.18784,1.84384v1.60593z\" fill=\"#4c4c4c\" stroke=\"#000000\" stroke-linecap=\"butt\"/></g></g></svg>","w":8.52633,"h":23.15778},{"text":"<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"8.5\" height=\"25.49905\" viewBox=\"0,0,8.5,25.49905\"><g transform=\"translate(-247.65961,-163.51961)\"><g data-paper-data=\"{&quot;isPaintingLayer&quot;:true}\" fill-rule=\"nonzero\" stroke-width=\"0.5\" stroke-linejoin=\"miter\" stroke-miterlimit=\"10\" stroke-dasharray=\"\" stroke-dashoffset=\"0\" style=\"mix-blend-mode: normal\"><path d=\"M251.96901,179.91867l-0.06614,8.84999\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M251.90961,180.87237v-7.94737\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M255.90961,180.84605l-4,-7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M251.90961,172.95132l-4,7.89473\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"none\" stroke=\"#000000\" stroke-linecap=\"round\"/><path d=\"M251.90963,172.925c-1.55512,0 -2.81579,-1.26067 -2.81579,-2.81579c0,-1.55512 1.26067,-2.81579 2.81579,-2.81579c1.55512,0 2.81579,1.26067 2.81579,2.81579c0,1.55512 -1.26067,2.81579 -2.81579,2.81579z\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"#ffffff\" stroke=\"#000000\" stroke-linecap=\"butt\"/><path d=\"M250.1991,170.37237c-0.27614,0 -0.5,-0.22386 -0.5,-0.5c0,-0.27614 0.22386,-0.5 0.5,-0.5c0.27614,0 0.5,0.22386 0.5,0.5c0,0.27614 -0.22386,0.5 -0.5,0.5z\" data-paper-data=\"{&quot;index&quot;:null}\" fill=\"#000000\" stroke=\"none\" stroke-linecap=\"butt\"/><path d=\"M248.71377,169.40119v-2.6216c0,0 2.13726,-3.00998 3.20389,-3.00998c1.06395,0 3.18784,3.00998 3.18784,3.00998v2.6216z\" fill=\"#4c4c4c\" stroke=\"#000000\" stroke-linecap=\"butt\"/></g></g></svg>","w":8.5,"h":25.49905}]};
+// his 17 mineral costumes: file, width, height, rotation centre (from his Scratch project)
+const HIS_MINERAL = {
+  "minerals_rock.svg": [35.314, 40.961, 17.556, 26.529], "minerals_granite.svg": [35.314, 41.211, 17.556, 26.529],
+  "minerals_glassum-crystal.svg": [45.081, 41.086, 22.439, 26.779], "minerals_pixulium-crystal.svg": [45.081, 41.211, 22.439, 26.654],
+  "minerals_vedgurium-crystal.svg": [49.329, 39.211, 24.664, 24.904], "minerals_holeium-crystal.svg": [42.123, 39.322, 20.991, 24.904],
+  "minerals_napalnium-crystal.svg": [50.888, 50.836, 25.373, 30.904], "minerals_grenium-crystal.svg": [42.868, 50.961, 21.364, 30.904],
+  "minerals_purplodium-crystal.svg": [51.017, 38.336, 25.438, 25.904], "minerals_ackium-crystal.svg": [41.052, 38.336, 20.335, 24.154],
+  "minerals_deathbleed-crystal.svg": [50.507, 50.586, 25.183, 31.654], "minerals_glimmercrystal.svg": [41.193, 40.461, 20.526, 26.029],
+  "minerals_invertia-crystal.svg": [40.352, 38.586, 20.106, 24.154], "minerals_amberhand-crystal.svg": [51.352, 42.461, 25.599, 29.779],
+  "minerals_cosmium-crystal.svg": [44.778, 42.764, 22.319, 26.081], "minerals_amium-crystal.svg": [41.668, 40.836, 20.757, 26.029],
+  "minerals_rektium-crystal.svg": [41.821, 40.836, 20.84, 26.029],
+};
+// the text colours from his Rarities chart
+const HIS_RARITY = { Common: "#828282", Uncommon: "#26ff00", Rare: "#009bff", Epic: "#ff00df", Legendary: "#e2ff00", Mythical: "#48006f", Angelic: "#ff6200", Celestial: "#0008ff", Acendant: "#ffffff", Transcendant: "#000000" };
+const HIS_EXOTIC = ["#ff0000", "#ff6f00", "#ffea00", "#11ff00", "#00ceff", "#b200ff"];
+
+// pictures: SVG text -> an <img> (a "data URL" holds the picture inside the link itself)
+const svgImgs = new Map();
+function svgImage(key, text) {
+  let img = svgImgs.get(key);
+  if (!img) {
+    img = new Image(); img._key = key;
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(text);
+    svgImgs.set(key, img);
+  }
+  return img;
+}
+function fileImage(path) {
+  let img = svgImgs.get(path);
+  if (!img) { img = new Image(); img._key = path; img.src = path; svgImgs.set(path, img); }
+  return img;
+}
+const imgReady = img => !!img && img.complete && img.naturalWidth > 0;
+// Draw an SVG picture so its point (cx, cy) lands on (x, y), k = world units per picture unit.
+// It is turned into pixels once per size (6% steps) and then just copied.
+const rasters = new Map();
+function rasterOf(img, w, h, k, sil) {
+  const ds = devScale(), b = Math.round(Math.log(k * ds) / Math.log(1.06)), key = img._key + "@" + b + (sil ? "s" : "");
+  let r = rasters.get(key);
+  if (r) return r;
+  if (rasters.size > 700) rasters.clear();
+  const kb = Math.pow(1.06, b) / ds, pw = Math.max(1, Math.ceil(w * kb * ds)), ph = Math.max(1, Math.ceil(h * kb * ds));
+  const c = makeCanvas(pw + 2, ph + 2), g = c.getContext("2d");
+  g.drawImage(img, 1, 1, pw, ph);
+  if (sil) { g.globalCompositeOperation = "source-in"; g.fillStyle = "#141110"; g.fillRect(0, 0, pw + 2, ph + 2); }
+  r = { c, kb }; rasters.set(key, r);
+  return r;
+}
+function drawSvg(img, w, h, cx, cy, x, y, k, sil) {
+  if (!imgReady(img) || !(k > 0) || !isFinite(x) || !isFinite(y)) return false;
+  if (GFX.canSprite) {
+    const r = rasterOf(img, w, h, k, sil), f = k / r.kb, ds = devScale();
+    ctx.drawImage(r.c, x - cx * k - f / ds, y - cy * k - f / ds, r.c.width / ds * f, r.c.height / ds * f);
+  } else if (!sil) ctx.drawImage(img, x - cx * k, y - cy * k, w * k, h * k);
+  return true;
+}
+function hexOf(c) { return "#" + hexRGB(c).map(v => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, "0")).join(""); }
+function hexShade(c, f) { const a = hexRGB(c), t = f < 0 ? 0 : 255, p = Math.abs(f); return hexOf("#" + a.map(v => Math.round(v + (t - v) * p).toString(16).padStart(2, "0")).join("")); }
+const xml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+
+// ---------- new minerals, drawn the way he draws his: flat colours, a thin black line, his 3 labels ----------
+function newMineralSvg(m, withText) {
+  const r = seeded(hashStr(m.name) ^ 0x51), v = VIS[m.name] || {};
+  const col = hexOf(m.color || (v.c && v.c[0]) || "#888888"), hi = hexShade(col, 0.45), lo = hexShade(col, -0.35);
+  const words = m.name.toLowerCase().split(" "), noun = words[words.length - 1];
+  const has = s => m.name.toLowerCase().includes(s);
+  let defs = "", fill = col;
+  if (v.grad) { defs = `<defs><linearGradient id="g" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="${hexOf(v.grad[0])}"/><stop offset="1" stop-color="${hexOf(v.grad[1])}"/></linearGradient></defs>`; fill = "url(#g)"; }
+  const S = 'stroke="#000000" stroke-width="0.5" stroke-linejoin="miter"';
+  const poly = (pts, f, extra = "") => `<path d="M${pts.map(p => p[0].toFixed(2) + "," + p[1].toFixed(2)).join(" L")} z" fill="${f}" ${S} ${extra}/>`;
+  const j = a => a + (r() - 0.5) * 1.6;
+  let shape = "";
+  if (m.d === 0 || ["ore", "chunk", "nugget", "clump", "stone", "rock"].includes(noun) || has("basalt") || has("heartstone")) {
+    const base = noun === "ore" ? "#7a7a7a" : col, pts = [];
+    for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; pts.push([23 + Math.cos(a) * j(8.5), 27 + Math.sin(a) * j(6.5)]); }
+    shape = poly(pts, base);
+    const spots = noun === "ore" ? col : hi;
+    for (let i = 0; i < 4; i++) shape += `<ellipse cx="${(19 + r() * 8).toFixed(2)}" cy="${(24 + r() * 6).toFixed(2)}" rx="${(1.2 + r()).toFixed(2)}" ry="${(0.9 + r() * 0.8).toFixed(2)}" fill="${spots}" stroke="none"/>`;
+  } else if (noun === "cube" || noun === "block") {
+    shape = poly([[17, 22], [27, 22], [27, 32], [17, 32]], fill) + poly([[17, 22], [21, 18], [31, 18], [27, 22]], hi) + poly([[27, 22], [31, 18], [31, 28], [27, 32]], lo);
+  } else if (noun === "orb") {
+    shape = `<circle cx="23" cy="26" r="7" fill="${fill}" ${S}/><circle cx="20.5" cy="23.5" r="2" fill="${hi}" stroke="none"/>`;
+  } else if (noun === "ingot") {
+    shape = poly([[15, 32], [31, 32], [28, 26], [18, 26]], fill) + poly([[18, 26], [28, 26], [26, 23], [20, 23]], hi);
+  } else if (noun === "dust") {
+    for (let i = 0; i < 8; i++) shape += `<circle cx="${(17 + r() * 12).toFixed(2)}" cy="${(27 + r() * 6).toFixed(2)}" r="${(1.2 + r() * 1.6).toFixed(2)}" fill="${i % 3 ? fill : hi}" ${S}/>`;
+  } else if (noun === "prism") {
+    shape = poly([[23, 13], [16, 33], [30, 33]], fill) + poly([[23, 13], [30, 33], [33, 30]], lo);
+  } else if (noun === "badge") {
+    let pts = []; for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 3.4 : 8; pts.push([23 + Math.cos(a) * rr, 26 + Math.sin(a) * rr]); }
+    shape = poly(pts, fill) + `<circle cx="23" cy="26" r="2.2" fill="${lo}" ${S}/>`;
+  } else if (noun === "gem") {
+    shape = poly([[15, 22], [18, 18], [28, 18], [31, 22], [23, 33]], fill) + poly([[15, 22], [31, 22], [23, 33]], lo) + poly([[18, 18], [23, 22], [28, 18]], hi);
+  } else if (noun === "fragment" || noun === "shard") {
+    shape = poly([[21, 34], [j(19.5), 19], [23, j(10)], [j(26.5), 19], [25, 34]], fill) + poly([[23, 34], [23, 12], [25.5, 19], [24.6, 34]], hi);
+    if (noun === "fragment") shape += poly([[26, 34], [29, 24], [31, 34]], fill);
+  } else if (has("hand") || has("claw")) {
+    shape = poly([[16, 33], [30, 33], [29, 27], [17, 27]], "#808080");
+    for (let i = 0; i < 5; i++) { const x = 17.5 + i * 2.8, top = 15 + Math.abs(i - 2) * 2 + (i === 0 ? 5 : 0); shape += poly([[x - 1.1, 28], [x + 1.1, 28], [x + 0.6, top + 1.5], [x, top], [x - 0.6, top + 1.5]], fill); }
+  } else if (has("heart")) {
+    shape = `<path d="M23,33 C14,26 15,18 19.5,18 C21.5,18 23,20 23,21.5 C23,20 24.5,18 26.5,18 C31,18 32,26 23,33 z" fill="${fill}" ${S}/>`;
+  } else {   // a crystal, like his
+    const pts = [[16.5, 34]]; const n = 4 + Math.floor(r() * 2);
+    for (let i = 0; i < n; i++) { const x = 16.5 + (i + 0.5) * 13 / n; pts.push([x - 1.4, j(26)]); pts.push([x, 11 + r() * 9]); }
+    pts.push([29.5, j(26)]); pts.push([29.5, 34]);
+    shape = poly(pts, fill) + poly([[21, 34], [22.5, 17], [24, 34]], hi);
+  }
+  let text = "";
+  if (withText) {
+    const T = (x, y, size, color, s, extra = "") => `<text x="${x}" y="${y}" font-size="${size.toFixed(2)}" fill="${color}" font-family="Helvetica, Arial, sans-serif" ${extra}>${s}</text>`;
+    const fitT = (s, size, maxW) => Math.min(size, maxW / Math.max(1, s.length * 0.56));
+    const goldTxt = "+" + (m.gold < 1e6 ? String(m.gold).replace(/\B(?=(\d{3})+(?!\d))/g, " ") : fmt(m.gold)) + " Gold";
+    let rar;
+    if (m.rarity === "Exotic") rar = T(0.1, 15.3, 8, "#ff0000", "Exotic".split("").map((c, i) => `<tspan fill="${HIS_EXOTIC[i]}">${c}</tspan>`).join(""));
+    else if (m.rarity === "Secret" || m.rarity === "Admin") {
+      const a = m.rarity === "Secret" ? ["#ff0000", "#000000"] : ["#000000", "#ffffff"];
+      defs += `<defs><linearGradient id="rt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${a[0]}"/><stop offset="1" stop-color="${a[1]}"/></linearGradient></defs>`;
+      rar = T(0.1, 15.3, 8, "url(#rt)", m.rarity);
+    } else rar = T(0.1, 15.3, fitT(m.rarity, 8, 30), HIS_RARITY[m.rarity] || "#828282", m.rarity);
+    text = rar + T(9.56, 6.66, fitT(goldTxt, 6.1, 36), "#000000", xml(goldTxt)) + T(1.33, 39.33, fitT(m.name, 5.6, 44), "#000000", xml(m.name));
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="46" height="42" viewBox="0,0,46,42">${defs}${shape}${text}</svg>`;
+}
+function mineralArt(m) {
+  if (m._art) return m._art;
+  const his = m.costume && HIS_MINERAL[m.costume];
+  if (his) m._art = { img: fileImage("assets/" + m.costume), w: his[0], h: his[1], cx: his[2], cy: his[3] };
+  else m._art = { img: svgImage("min" + m.id, newMineralSvg(m, true)), w: 46, h: 42, cx: 23, cy: 27 };
+  return m._art;
+}
+// the glowing crystals in the cave walls: same flat style, no labels
+function drawWallCrystal(m, x, y, s) {
+  const img = svgImage("wall" + m.id, newMineralSvg(m, false));
+  drawSvg(img, 46, 42, 23, 27, x, y, s / 6);
+}
+// his rock, recoloured for the deeper rocks (his Rock Cave keeps his exact colours)
+function hisRockImage(stage, pal) {
+  if (pal === ROCK_PAL[0]) return svgImage("rock" + stage, HIS.rock[stage]);
+  const t = HIS.rock[stage].split("#525252").join(pal.body).split("#484848").join(hexShade(pal.body, -0.08)).split("#434343").join(pal.spot);
+  return svgImage("rock" + stage + pal.body, t);
+}
+function drawHisRock(x, y, R, pal, dmg, o) {
+  const stage = clamp(Math.ceil(clamp(dmg, 0, 1) * 4 - 1e-9), 0, 4);   // his costumes: Rock, Rock broken 1..4
+  const img = hisRockImage(stage, pal);
+  if (!imgReady(img)) return false;
+  const k = R / 6.6;
+  ctx.save(); ctx.translate(x, y); ctx.scale(o.sx || 1, o.sy || 1); ctx.rotate(o.rot || 0);
+  drawSvg(img, 13.717, 13.717, 6.859, 6.859, 0, 0, k);
+  if (o.flash > 0.01 || o.bright) {   // effects on top: hit flash + his brightness effect, only on the rock
+    ctx.beginPath(); ctx.arc(0, 0, 6.6 * k, 0, TAU); ctx.clip();
+    if (o.flash > 0.01) { ctx.fillStyle = `rgba(255,255,255,${clamp(o.flash, 0, 1)})`; ctx.fillRect(-8 * k, -8 * k, 16 * k, 16 * k); }
+    if (o.bright) { ctx.fillStyle = `rgba(0,0,0,${clamp(-o.bright / 100 * 1.6, 0, 1)})`; ctx.fillRect(-8 * k, -8 * k, 16 * k, 16 * k); }
+  }
+  ctx.restore();
+  return true;
+}
+// his miner. Skins only change the colour of his pickaxe head; mini miners get a yellow hat.
+function playerImage(frame, skin, mini) {
+  const key = "player" + frame + skin.id + (mini ? "m" : "");
+  if (svgImgs.has(key)) return svgImgs.get(key);
+  let t = HIS.player[frame].text;
+  if (skin.id !== "classic") {
+    let stops;
+    if (skin.head === "rainbow") stops = ["#ff0000", "#ffea00", "#11ff00", "#00ceff", "#b200ff"];
+    else if (skin.head === "pixel") stops = ["#4eff00", "#ca00ff", "#ff0000", "#0090ff", "#ffea00"];
+    else stops = [hexOf(skin.head[0]), hexOf(skin.head[1])];
+    const st = stops.map((c, i) => `<stop offset="${(i / (stops.length - 1)).toFixed(2)}" stop-color="${c}"/>`).join("");
+    t = t.replace(/(<svg[^>]*>)/, m => m + `<defs><linearGradient id="pk" x1="0" y1="0" x2="1" y2="1">${st}</linearGradient></defs>`).split('fill="#7b7b7b"').join('fill="url(#pk)"');
+  }
+  if (mini) t = t.split("#ff9b00").join("#fff27a");
+  return svgImage(key, t);
+}
+// costume1 = pickaxe down (on the rock), costume2 = raised: his 2-frame swing
+function drawMiner(x, gy, s, swing, t, smear, skin = SKINS[0], flip = 1, hat = true) {
+  const frame = swing < 0.5 ? 0 : 1, P = HIS.player[frame], k = 7.3 * s;
+  const img = playerImage(frame, skin, !hat);
+  if (!imgReady(img)) { drawMinerVector(x, gy, s, swing, t, smear, skin, flip, hat); return; }
+  ctx.save(); ctx.translate(x, gy); ctx.scale(flip, 1);
+  if (smear > 0.05) { ctx.strokeStyle = skinTrail(skin, smear * 0.45, t); ctx.lineWidth = 3.2 * k; ctx.lineCap = "round"; ctx.beginPath(); ctx.arc(4.3 * k, -11 * k, 9 * k, -1.9, -0.2); ctx.stroke(); }
+  if (skin.glow) glow(11.5 * k, -12 * k, 6 * k, skin.glow, 0.5 + 0.2 * Math.sin(t * 6));
+  drawSvg(img, P.w, P.h, 4.276, 23.04, 0, 0, k);
+  ctx.restore();
+}
+// his Rock police (his drawing faces left). The Chief has a gold cap, the thief a black one.
+function policeImage(frame, look) {
+  const key = "police" + frame + (look || "");
+  if (svgImgs.has(key)) return svgImgs.get(key);
+  let t = HIS.police[frame].text;
+  if (look === "chief") t = t.split("#4c4c4c").join("#ffcf3a");
+  if (look === "thief") t = t.split("#4c4c4c").join("#1a1a1a");
+  return svgImage(key, t);
+}
+function drawPolice(x, gy, s, walk, t, face = -1, talking = false, look) {
+  const frame = talking ? 0 : Math.floor(walk * 1.3) % 2, P = HIS.police[frame], k = 7.3 * s;
+  const img = policeImage(frame, look);
+  if (!imgReady(img)) { drawPoliceVector(x, gy, s, walk, t, face, talking); return; }
+  ctx.save(); ctx.translate(x, gy); ctx.scale(face < 0 ? 1 : -1, 1);
+  drawSvg(img, P.w, P.h, 4.25, P.h - 0.25, 0, 0, k);
+  if (look === "chief") star(4.25 * k, -(P.h - 0.25 - 1.6) * k, 1.2 * k, "#fff6a0", 0.6 + 0.4 * Math.sin(t * 4));   // shiny cap
+  ctx.restore();
+}
+// the rock thief: his police drawing with a black cap, a mask and a loot bag
+function drawThief(x, gy, s, walk, t) {
+  const k = 7.3 * s;
+  ctx.save(); ctx.translate(x, gy);
+  ctx.beginPath(); ctx.arc(-3.2 * k, -14 * k, 3.2 * k, 0, TAU); ctx.fillStyle = "#b08040"; ctx.fill(); ctx.lineWidth = 0.5 * k; ctx.strokeStyle = "#000000"; ctx.stroke();   // loot bag
+  ctx.font = `${(3 * k).toFixed(1)}px ${FONT_T}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#000000"; ctx.fillText("$", -3.2 * k, -13.8 * k);
+  ctx.restore();
+  drawPolice(x, gy, s, walk, t, 1, false, "thief");
+  // mask over the eyes (he faces right, so mirror the head position)
+  ctx.fillStyle = "#000000"; ctx.fillRect(x - 3.2 * k, gy - 19 * k, 6.4 * k, 1.2 * k);
+}
+// a talking head for the dialog box, cut from his own drawings
+function portrait(who, cx, cy, r) {
+  const police = who !== "you";
+  const P = police ? HIS.police[0] : HIS.player[0];
+  const img = police ? policeImage(0, who === "chief" ? "chief" : who === "thief" ? "thief" : "") : playerImage(0, SKINS.find(k => k.id === S.skin) || SKINS[0], false);
+  const head = police ? [4.25, 4.41] : [4.28, 4.54], k = r * 0.62 / 2.82;
+  if (!drawSvg(img, P.w, P.h, head[0], head[1], cx, cy, k)) drawHead(police ? "police" : "miner", cx, cy + r * 0.25, r * 0.66, police ? -1 : 1, 0);
+}
+
 // ---------- Rocks ----------
 // His rock: a round grey boulder (#525252) with darker spots, cracking in
 // 4 stages. Each layer has its own kind of rock.
@@ -679,6 +943,8 @@ const ROCK_PAL = [
   { body: "#3f4c5e", light: "#6f86a3", dark: "#1c2430", spot: "#313b4a", crack: INK, frost: true },     // Basalt
   { body: "#4a2a22", light: "#7a4a38", dark: "#1e0f0b", spot: "#2e1a15", crack: "#ff7a1a", hot: true }, // Magma rock
   { body: "#2c2140", light: "#5a4880", dark: "#120c1e", spot: "#1e1630", crack: "#c070ff", hot: true },  // Void stone
+  { body: "#2c2140", light: "#5a4880", dark: "#120c1e", spot: "#1e1630", crack: "#c070ff", hot: true },  // (the Core has no rocks)
+  { body: "#6a2030", light: "#a04a5a", dark: "#2a0a12", spot: "#4a1420", crack: "#ff4a6a", hot: true },  // Heartstone
 ];
 function rockShape(seed) {
   const r = seeded(seed), pts = [], spots = [], cracks = [];
@@ -693,6 +959,7 @@ function rockShape(seed) {
 }
 const rockSprites = new Map();
 function drawRockSprite(x, y, R, pal, shape, rot) {
+  if (imgReady(hisRockImage(0, pal))) { drawRock(x, y, R, pal, shape, 0, { rot }); return; }
   const ds = devScale(), key = shape.pts[0][0].toFixed(5) + pal.body + Math.round(R * ds);
   let e = rockSprites.get(key);
   if (!e) {
@@ -709,7 +976,7 @@ function drawRockSprite(x, y, R, pal, shape, rot) {
 function drawRock(x, y, R, pal, shape, dmg, o = {}) {
   if (!(R > 1)) return;
   ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(x, y + R * 0.9, R * 0.95, R * 0.18, 0, 0, TAU); ctx.fill();
-  drawRockBody(x, y, R, pal, shape, dmg, o);
+  if (!drawHisRock(x, y, R, pal, dmg, o)) drawRockBody(x, y, R, pal, shape, dmg, o);   // his picture until it has loaded
 }
 function drawRockBody(x, y, R, pal, shape, dmg, o = {}) {
   ctx.save();
@@ -823,7 +1090,8 @@ function drawHead(kind, x, y, r, face = 1, t = 0) {
   ctx.restore();
 }
 // swing: 0 = pickaxe down on the rock, 1 = raised (his costume1 / costume2)
-function drawMiner(x, gy, s, swing, t, smear, skin = SKINS[0], flip = 1, hat = true) {
+// (the code-drawn miner is only used for a moment while his picture loads)
+function drawMinerVector(x, gy, s, swing, t, smear, skin = SKINS[0], flip = 1, hat = true) {
   ctx.save(); ctx.translate(x, gy); ctx.scale(s * flip, s);
   const bob = Math.sin(t * 2.2) * 1.5;
   const hip = [0, -64 + bob * 0.3], neck = [2, -112 + bob], sh = [3, -104 + bob];
@@ -851,7 +1119,7 @@ function drawMiner(x, gy, s, swing, t, smear, skin = SKINS[0], flip = 1, hat = t
   drawHead(hat ? "miner" : "mini", 4, -134 + bob, 22, 1, t);
   ctx.restore();
 }
-function drawPolice(x, gy, s, walk, t, face = -1, talking = false) {
+function drawPoliceVector(x, gy, s, walk, t, face = -1, talking = false) {
   ctx.save(); ctx.translate(x, gy); ctx.scale(s, s);
   const sw = Math.sin(walk) * 0.5, bob = Math.abs(Math.cos(walk)) * -3 + Math.sin(t * 2) * 1;
   const hip = [0, -64 + bob], neck = [0, -112 + bob];
@@ -964,6 +1232,12 @@ function drawIcon(name, x, y, s, color = "#f4ead8") {
     case "orders": ctx.fillStyle = "#e8dcc0"; ctx.beginPath(); ctx.rect(-s * 0.32, -s * 0.42, s * 0.64, s * 0.84); ctx.fill(); st(s * 0.08, INK);
       for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(-s * 0.18, -s * 0.2 + i * s * 0.18); ctx.lineTo(s * 0.18, -s * 0.2 + i * s * 0.18); st(s * 0.06, "#6a5a40"); }
       ctx.save(); ctx.translate(s * 0.22, s * 0.3); ctx.fillStyle = "#ffcf3a"; ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.08 : s * 0.18; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.lineWidth = s * 0.05; ctx.strokeStyle = INK; ctx.stroke(); ctx.restore(); break;
+    case "museum": ctx.fillStyle = "#bdb6a8"; ctx.fillRect(-s * 0.3, s * 0.05, s * 0.6, s * 0.4); ctx.strokeStyle = INK; ctx.lineWidth = s * 0.07; ctx.strokeRect(-s * 0.3, s * 0.05, s * 0.6, s * 0.4);
+      ctx.fillRect(-s * 0.4, s * 0.38, s * 0.8, s * 0.1); ctx.strokeRect(-s * 0.4, s * 0.38, s * 0.8, s * 0.1);
+      ctx.beginPath(); ctx.moveTo(-s * 0.16, s * 0.02); ctx.lineTo(-s * 0.08, -s * 0.42); ctx.lineTo(0, -s * 0.18); ctx.lineTo(s * 0.08, -s * 0.46); ctx.lineTo(s * 0.16, s * 0.02); ctx.closePath(); ctx.fillStyle = "#4dc3ff"; ctx.fill(); st(s * 0.06, INK); break;
+    case "thief": ctx.beginPath(); ctx.arc(0, s * 0.1, s * 0.34, 0, TAU); ctx.fillStyle = "#b08040"; ctx.fill(); st(s * 0.07, INK);
+      ctx.font = `${s * 0.4}px ${FONT_T}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#000"; ctx.fillText("$", 0, s * 0.12); break;
+    case "double": drawCoin(-s * 0.15, 0, s * 0.3); drawCoin(s * 0.15, 0, s * 0.3); break;
     case "badge": ctx.fillStyle = "#ffcf3a"; ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.2 : s * 0.45; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); st(s * 0.08, INK); break;
   }
   ctx.restore();
@@ -981,6 +1255,7 @@ const SKINS = [
   { id: "magma",   name: "Magma",     cost: -1, boss: 2, head: ["#ffd04a", "#c83a00"], handle: "#2a1a10", trail: [255, 120, 30], glow: "rgba(255,120,30,0.6)" },
   { id: "void",    name: "Void",      cost: -1, boss: 3, head: ["#c89aff", "#2a1a4a"], handle: "#120c1e", trail: [190, 120, 255], glow: "rgba(170,90,255,0.6)" },
   { id: "rektium", name: "Rektium",   cost: 12, head: "rainbow",              handle: "#1a1a1a", trail: "rainbow" },
+  { id: "heart",   name: "Heart", cost: -1, boss: 5, head: ["#ff6a8a", "#a00020"], handle: "#3a0a14", trail: [255, 90, 130], glow: "rgba(255,60,110,0.5)" },
   { id: "baton",   name: "Police issue", cost: 20, head: ["#7a7a86", "#2a2a30"], handle: "#262a3a", trail: [154, 176, 255], glow: "rgba(120,150,255,0.5)" },
 ];
 function skinTrail(skin, a, t) { return skin.trail === "rainbow" ? hsl((t * 200) % 360, 100, 65, a) : rgb(skin.trail, a); }
@@ -1035,6 +1310,10 @@ function drawBossFace(L, x, y, R, t, hurt) {
   if (L === 1) {          // The Big Basalt: ice spikes
     for (let i = -2; i <= 2; i++) { const bx = i * R * 0.22, h = R * (0.35 - Math.abs(i) * 0.06); ctx.beginPath(); ctx.moveTo(bx - R * 0.1, -R * 0.78 + Math.abs(i) * R * 0.05); ctx.lineTo(bx, -R * 0.78 - h + Math.abs(i) * R * 0.05); ctx.lineTo(bx + R * 0.1, -R * 0.78 + Math.abs(i) * R * 0.05); ctx.closePath(); ctx.fillStyle = "#bfefff"; ctx.fill(); ctx.lineWidth = R * 0.03; ctx.strokeStyle = INK; ctx.stroke(); }
   }
+  if (L === 5) {          // The Heart Guardian: a heart on its forehead
+    ctx.beginPath(); ctx.moveTo(0, -R * 0.42); ctx.bezierCurveTo(-R * 0.3, -R * 0.62, -R * 0.2, -R * 0.82, 0, -R * 0.66); ctx.bezierCurveTo(R * 0.2, -R * 0.82, R * 0.3, -R * 0.62, 0, -R * 0.42);
+    ctx.fillStyle = "#ff2050"; ctx.fill(); ctx.lineWidth = R * 0.03; ctx.strokeStyle = INK; ctx.stroke();
+  }
   if (L === 2) {          // Magma King: a gold crown
     ctx.beginPath(); ctx.moveTo(-R * 0.4, -R * 0.72); ctx.lineTo(-R * 0.45, -R * 1.12); ctx.lineTo(-R * 0.2, -R * 0.92); ctx.lineTo(0, -R * 1.2); ctx.lineTo(R * 0.2, -R * 0.92); ctx.lineTo(R * 0.45, -R * 1.12); ctx.lineTo(R * 0.4, -R * 0.72); ctx.closePath();
     const g = ctx.createLinearGradient(0, -R * 1.2, 0, -R * 0.7); g.addColorStop(0, "#fff2a0"); g.addColorStop(1, "#d08a00"); ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = R * 0.04; ctx.strokeStyle = INK; ctx.stroke();
@@ -1061,6 +1340,7 @@ const CAVE_PAL = [
   { top: "#1c0b06", bot: "#2e130a", far: "#4a2416", mid: "#36190f", floor: "#22100a", stripe: "#170a06", near: "#0b0402", fog: "rgba(255,120,40,0.07)", amb: "rgba(255,110,30,0.16)" },
   { top: "#08060f", bot: "#140e22", far: "#2a1f40", mid: "#1d1530", floor: "#150f22", stripe: "#0d0916", near: "#040208", fog: "rgba(170,110,255,0.07)", amb: "rgba(180,100,255,0.12)" },
   { top: "#2a0d03", bot: "#4a1a05", far: "#6a2a10", mid: "#4a1e0a", floor: "#2a1206", stripe: "#1c0b04", near: "#0e0502", fog: "rgba(255,160,60,0.10)", amb: "rgba(255,150,50,0.22)" },
+  { top: "#1a0408", bot: "#2e0a12", far: "#4a1422", mid: "#36101a", floor: "#240a10", stripe: "#16060a", near: "#0a0204", fog: "rgba(255,60,100,0.08)", amb: "rgba(255,70,110,0.16)" },
 ];
 let caveCache = null;
 function buildCave(L, W, H, ground) {
@@ -1070,7 +1350,7 @@ function buildCave(L, W, H, ground) {
   for (let row = 0; row < 4; row++)
     for (let x = -200; x < W + 200; x += 70 + r() * 70)
       c.blobs.push({ x, y: H * (0.12 + row * 0.2) + (r() - 0.5) * 80, r: 60 + r() * 110, f: (r() - 0.5) * 0.12 });
-  const list = LAYER_MINERALS[Math.min(L, 3)];
+  const list = LAYER_MINERALS[L === 4 ? 3 : L];
   for (let i = 0; i < 16; i++) c.crystals.push({ x: r() * (W + 200) - 100, y: H * 0.16 + r() * (ground - H * 0.3), s: 8 + r() * 10, m: list[1 + Math.floor(r() * Math.min(list.length - 1, 6))], ph: r() * TAU });
   for (let x = -150; x < W + 150; x += 40 + r() * 60) c.stal.push({ x, w: 26 + r() * 50, l: 40 + r() * 130, k: r() });
   for (let x = -150; x < W + 150; x += 90 + r() * 120) c.mites.push({ x, w: 30 + r() * 50, l: 20 + r() * 60 });
@@ -1143,7 +1423,7 @@ function drawCave(L, t, px, py, lay, veinGlow) {
   for (const k of c.crystals) {
     const tw = 0.6 + 0.4 * Math.sin(t * 1.5 + k.ph);
     if (!GFX.low || veinGlow) glow(k.x, k.y, k.s * (3 + veinGlow * 3), rarityGlowColor(k.m.rarity, t), (0.25 + veinGlow * 0.5) * tw);
-    drawMineral(k.m, k.x, k.y, k.s, { t });
+    drawWallCrystal(k.m, k.x, k.y, k.s);
   }
   ctx.restore();
   // ceiling (drips are live)
@@ -1427,6 +1707,7 @@ const SONGS = [
   { bpm: 112, chords: [[52, 55, 59], [48, 52, 55], [50, 54, 57], [47, 51, 54]], kick: [0, 2, 4, 6] }, // Em C D B
   { bpm: 84,  chords: [[48, 51, 55], [44, 48, 51], [46, 51, 55], [46, 50, 53]], kick: [0, 5] },  // Cm Ab Eb Bb
   { bpm: 124, chords: [[52, 55, 59], [48, 52, 55], [50, 54, 57], [47, 51, 54]], kick: [0, 2, 4, 6] },
+  { bpm: 100, chords: [[49, 52, 56], [45, 49, 52], [47, 51, 54], [44, 47, 51]], kick: [0, 3, 4] },   // C#m A B G#m: a heartbeat
 ];
 const ARP = [0, 1, 2, 1, 3, 2, 1, 2];
 const LEAD = [[0, 7], [2, 9], [3, 7], [5, 12], [6, 9]];  // [step, interval above root]
@@ -1473,7 +1754,8 @@ function loadSave() {
       else if (typeof def === "boolean") { if (typeof v === "boolean") s[k] = v; }
       else if (typeof def === "string") { if (typeof v === "string") s[k] = v; }
       else if (Array.isArray(def)) {
-        if (k === "quests") { if (Array.isArray(v)) s.quests = v.filter(q => q && typeof q.type === "string" && num(q.n) && num(q.base)).slice(0, 3); }
+        if (k === "museum") { if (Array.isArray(v)) s.museum = v.filter(n => num(n) && n >= 0 && n < MINERALS.length && Number.isInteger(n)).slice(0, MUSEUM_SLOTS); }
+        else if (k === "quests") { if (Array.isArray(v)) s.quests = v.filter(q => q && typeof q.type === "string" && num(q.n) && num(q.base)).slice(0, 3); }
         else if (Array.isArray(v)) v.forEach((n, i) => { if (i < def.length && num(n)) def[i] = n; });
       } else if (def && typeof def === "object") { if (v && typeof v === "object") for (const j in v) { if (typeof v[j] === "boolean" || num(v[j])) def[j] = v[j]; } }
     }
@@ -1551,7 +1833,7 @@ function computeLayout() {
   if (rightSpot < W - 50 * lay.s) { lay.policeX = rightSpot; lay.policeSide = 1; }
   else { lay.policeX = Math.max(lay.sceneL + 50 * lay.s, lay.minerX - 150 * lay.s); lay.policeSide = -1; }   // no room on the right: stand behind the miner
   // bottom bar: shop button on the left, dock buttons on the right, event bars in between
-  lay.dockN = 2 + (S.police ? 1 : 0) + (S.rebirths > 0 || S.stars > 0 ? 1 : 0);
+  lay.dockN = 3 + (S.police ? 1 : 0) + (S.rebirths > 0 || S.stars > 0 ? 1 : 0);
   lay.dockL = W - 14 - lay.dockN * 64 + 10;
   lay.barsCX = (210 + lay.dockL) / 2;
   lay.barsW = Math.min(340, lay.dockL - 230);
@@ -1606,7 +1888,8 @@ const rock = { shape: rockShape(1), dmg: 0, rot: 0, size: 1, bright: 0, flash: 0
 const game = { cool: 0, swing: 1, smear: 0, shake: 0, px: 0, py: 0, drillT: 0, goldShown: 0, incomeHist: [], helperAcc: 0, helperNext: 0, minis: [1, 1, 1, 1, 1, 1, 1, 1], coreBreakT: 0, lastFlashT: -999, lastShineT: -999 };
 const floaters = [];       // his mineral "clones" that float up and fade
 const falling = [];        // cave-in rocks and meteors
-const ev = { rush: 0, rushMax: 1, vein: 0, veinMax: 10, frenzy: 0, frenzyMax: 1, next: 30 * 75 };
+const ev = { rush: 0, rushMax: 1, vein: 0, veinMax: 10, frenzy: 0, frenzyMax: 1, double: 0, doubleMax: 1, next: 30 * 75 };
+let thief = null;          // the rock thief, while he runs
 const police = { state: "off", x: 0, walk: 0, purpose: null, quota: null };
 let introAt = 0;
 
@@ -1620,7 +1903,7 @@ function newRock() {
   rock.pop = 0;
   // boss rocks (never in his Rock Cave)
   rock.boss = false;
-  if (S.layer >= 1 && S.layer <= 3) {
+  if (BOSSES[S.layer]) {
     if (S.bossActive === S.layer) rock.boss = true;
     else if (S.bossNext === S.layer) {
       S.bossNext = -1; S.bossActive = S.layer; rock.boss = true;
@@ -1633,6 +1916,7 @@ function newRock() {
 newRock();
 function overRock() { const r = lay.R * rock.size; return Math.hypot(mouse.x - lay.rockX, mouse.y - lay.rockY) <= r * 1.05; }
 function maxTierFound() { let t = -1; S.found.forEach((n, i) => { if (n > 0) t = Math.max(t, tierOf(MINERALS[i].rarity)); }); return t; }
+function mineLayer() { return S.layer === 4 ? 3 : S.layer; }   // the Core has no minerals of its own
 function shake(n) { if (settings.shake) game.shake = Math.max(game.shake, n); }
 function incomePerSec() { const h = game.incomeHist; const v = h.length > 1 ? (h[h.length - 1] - h[0]) / (h.length - 1) : 0; return isFinite(v) && v > 0 ? v : 0; }
 function eventSecs(base) { return base * (1 + 0.25 * eventBoost(S)); }
@@ -1683,6 +1967,8 @@ function breakIt() {
   if (ev.vein > 0) { ev.vein--; if (ev.vein === 0) linger("CRYSTAL VEIN", 0, "#4dc3ff"); }
   if (police.quota) police.quota.got++;
   popMineral(id, null, payout(S, id, ev.rush > 0));
+  if (ev.double > 0) { const id2 = breakRock(S, rand, { rush: ev.rush > 0, vein: ev.vein > 0 }); popMineral(id2, null, payout(S, id2, ev.rush > 0), 4); }   // DOUBLE DROP
+  if (S.found[BADGE_MINERAL] === 1 && !S.ach.badge) { award("badge"); S.badges += 10; banner("THE CHIEF'S LOST BADGE!", "+10 police badges", "#ffcf3a", 110); }
   burstChips(lay.rockX, lay.rockY, 18, ROCK_PAL[S.layer], 1.4);
   rock.pause = rock.pauseMax = BREAK_PAUSE_TICKS;
   anims.goldbump = 1;
@@ -1691,7 +1977,7 @@ function breakIt() {
 function popMineral(id, x, gained, delay = 0, y0) {
   const m = MINERALS[id], tier = tierOf(m.rarity), isNew = S.found[id] === 1;
   if (x === null) {
-    const lane = lay.R * 1.25 / lay.s, busy = f => f.life < f.max * 0.65;
+    const lane = lay.R * 1.7 / lay.s, busy = f => f.life < f.max * 0.65;
     let best = null, bestAge = -1;
     for (const k of [0, -1, 1, -2, 2]) {
       const lx = k * lane, ax = lay.rockX + lx * lay.s;
@@ -1776,8 +2062,9 @@ function maxedText(k) {
 const TITLE_OF = { mult: "Money multiplier", speed: "Mining speed", drill: "Drill", pick: "Pickaxe", crit: "Sharp eye", luck: "Lucky charm", helper: "Mini miners", event: "Lucky lantern", gear: "Gear" };
 function cardInfo(k) {
   if (k === "dig") {
-    if (S.maxLayer < LAYERS.length - 1) return { k, icon: "dig", level: S.maxLayer, max: LAYERS.length - 1, cost: nextCost(S, "dig"), title: `Dig to ${LAYERS[S.maxLayer + 1].name}`, sub: S.maxLayer + 1 === 4 ? "The very bottom. Something glows down there..." : `Tougher rocks, ${LAYER_MINERALS[S.maxLayer + 1].length} new minerals, a boss` };
-    if (!S.coreBroken) return { k, icon: "dig", level: 4, max: 4, cost: Infinity, locked: true, title: "Break the Core!", sub: `${fmt(S.coreHP)} / ${fmt(CORE_HP)} HP left` };
+    if (LAYERS[S.maxLayer].core && !S.coreBroken) return { k, icon: "dig", level: S.maxLayer, max: LAYERS.length - 1, cost: Infinity, locked: true, title: "Break the Core!", sub: `${fmt(S.coreHP)} / ${fmt(CORE_HP)} HP left` };
+    if (S.maxLayer < LAYERS.length - 1) return { k, icon: "dig", level: S.maxLayer, max: LAYERS.length - 1, cost: nextCost(S, "dig"), title: `Dig to ${LAYERS[S.maxLayer + 1].name}`, sub: S.maxLayer + 1 === 4 ? "The very bottom. Something glows down there..." : S.maxLayer + 1 === 5 ? "Below the broken Core, something is beating..." : `Tougher rocks, ${LAYER_MINERALS[S.maxLayer + 1].length} new minerals, a boss` };
+    if (false) return { k, icon: "dig", level: 4, max: 4, cost: Infinity, locked: true, title: "Break the Core!", sub: `${fmt(S.coreHP)} / ${fmt(CORE_HP)} HP left` };
     return { k, icon: "rebirth", level: 0, max: 0, cost: 0, rebirth: true, title: "REBIRTH", sub: `Start over: x${fmt(Math.pow(2, S.rebirths + 1))} gold, +${STARS_PER_REBIRTH} stars` };
   }
   const lv = S[k], list = UPG[k], next = list[lv];
@@ -1805,7 +2092,7 @@ function doRebirth() {
   const prev = S.layer;
   S = rebirth(S);
   // reset everything that belongs to the old run
-  ev.rush = 0; ev.vein = 0; ev.frenzy = 0; music.rush = false; ev.next = 30 * 75;
+  ev.rush = 0; ev.vein = 0; ev.frenzy = 0; ev.double = 0; thief = null; music.rush = false; ev.next = 30 * 75;
   falling.length = 0; floaters.length = 0; ui.linger = []; ui.banner = null; ui.dialog = null;
   police.state = "off"; police.quota = null;
   game.goldShown = S.gold; game.incomeHist = []; game.helperAcc = 0; game.coreBreakT = 0; ui.pendingEnding = 0;
@@ -1835,7 +2122,8 @@ function freeSpot(r) {
 }
 const fx = (b, target) => lay.rockX + (target && b.target !== undefined ? b.target : b.x) * lay.s;   // where a falling thing is on screen
 function startEvent(force) {
-  const opts = ["rush", "cavein", "vein", "meteor", "frenzy"];
+  const opts = ["rush", "cavein", "vein", "meteor", "frenzy", "double"];
+  if (S.gold > 1000 && !thief && !LAYERS[S.layer].core) opts.push("heist");
   if (S.police && S.speed >= 3 && police.state === "off" && !LAYERS[S.layer].core) opts.push("quota", "quota");
   let e = force || opts[Math.floor(rand() * opts.length)];
   // no doubling up on the same event
@@ -1868,8 +2156,39 @@ function startEvent(force) {
     }
   }
   if (e === "quota") startPolice("quota");
+  if (e === "double") { ev.double = ev.doubleMax = Math.round(30 * eventSecs(15)); SFX.alarm(); banner("DOUBLE DROP!", `Every rock drops 2 minerals for ${Math.round(eventSecs(15))} seconds`, "#7dff6a", 100, "double"); award("double"); }
+  if (e === "heist" && !thief) {
+    const stolen = Math.floor(S.gold * 0.05);
+    S.gold -= stolen;
+    thief = { x: lay.sceneL - 40, walk: 0, hits: 0, stolen, vx: (W - lay.sceneL + 120) / (30 * 7) };
+    SFX.alarm(); SFX.whistle();
+    floatText(110, lay.hud + 30, "-" + fmt(stolen), "#ff6a5a", 26);
+    banner("ROCK THIEF!", `He stole ${fmt(stolen)} Gold! Click him 3 times!`, "#ff7a6a", 110, "thief");
+  }
+}
+function thiefHit() {
+  const k = 7.3 * lay.s;
+  return thief && Math.abs(mouse.x - thief.x) < 6 * k && mouse.y < lay.ground + 4 && mouse.y > lay.ground - 25 * k;
 }
 function scenePress() {
+  if (thiefHit()) {
+    mouse.ui = true; thief.hits++;
+    playHis("punch", 0.8); shake(5); burstSparks(thief.x, lay.ground - 12 * 7.3 * lay.s, 12, "#ffd447", 6);
+    floatText(thief.x, lay.ground - 26 * 7.3 * lay.s, thief.hits + " / 3", "#ffffff", 22);
+    if (thief.hits >= 3) {
+      const back = Math.floor(thief.stolen * 1.5), L = mineLayer(), id = rollMineral(L, luckRolls(S) + 2, rand);
+      addGold(S, back); noteFind(S, id); S.badges += 1; S.thiefCaught++; S.heists++;
+      popMineral(id, (thief.x - lay.rockX) / lay.s, payout(S, id, false), 0, lay.ground - 120 * lay.s);
+      addGold(S, payout(S, id, false));
+      linger("ROCK THIEF: CAUGHT", 1, "#7dff6a");
+      banner("THIEF CAUGHT!", `+${fmt(back)} Gold and a police badge`, "#7dff6a", 100);
+      SFX.buy(); SFX.whistle(); confetti(30);
+      thief = null;
+      if (S.thiefCaught >= 3 && !S.chiefMet && police.state === "off") ui.pendingChief = 60;
+      save();
+    }
+    return;
+  }
   for (let i = falling.length - 1; i >= 0; i--) {
     const b = falling[i];
     const bx = fx(b);
@@ -1879,13 +2198,13 @@ function scenePress() {
     if (b.kind === "meteor") {
       SFX.boom(); playHis("punch", 0.6);
       burstSparks(bx, b.y, 30, "#ffb040", 8);
-      const L = Math.min(S.layer, 3), id = rollMineral(L, luckRolls(S) + 3, rand), g = payout(S, id, ev.rush > 0) * 3;
+      const L = mineLayer(), id = rollMineral(L, luckRolls(S) + 3, rand), g = payout(S, id, ev.rush > 0) * 3;
       addGold(S, g); noteFind(S, id); S.meteors++;
       popMineral(id, (bx - lay.rockX) / lay.s, g, 0, b.y);
     } else {
       playHis("punch", 0.8); SFX.boom();
-      burstChips(bx, b.y, 14, ROCK_PAL[Math.min(S.layer, 3)], 1.1);
-      const g = payout(S, rollMineral(Math.min(S.layer, 3), luckRolls(S), rand), ev.rush > 0) * 2;
+      burstChips(bx, b.y, 14, ROCK_PAL[mineLayer()], 1.1);
+      const g = payout(S, rollMineral(mineLayer(), luckRolls(S), rand), ev.rush > 0) * 2;
       addGold(S, g); S.boulders++;
       floatText(bx, b.y - b.r, "+" + fmt(g), "#ffcc33", 22);
     }
@@ -1907,6 +2226,9 @@ function policeArrived() {
     const per = (Math.ceil(curHP() / pickPower(S)) * hitInterval(S) + 0.1);
     const need = clamp(Math.floor(30 / per * 0.7), 5, 40);
     say([["police", `ROCK INSPECTION! Break ${need} rocks in 30 seconds.`], ["you", "Uh... okay?"]], () => { p.quota = { need, got: 0, t: Math.round(30 * eventSecs(30)), max: Math.round(30 * eventSecs(30)) }; p.state = "stand"; banner("ROCK INSPECTION", `Break ${need} rocks!`, "#9ab0ff", 80, "police"); });
+  } else if (p.purpose === "chief") {
+    say([["chief", "ATTENTION! I am the Chief of the Rock police."], ["chief", "You caught three rock thieves. Not bad, miner."], ["you", "Thanks... I think?"], ["chief", "Here, take 5 police badges."], ["chief", "And if you ever dig below the Core... I lost my badge down there."]],
+      () => { p.state = "out"; S.chiefMet = true; S.badges += 5; award("chief"); SFX.levelUp(); save(); });
   } else if (p.purpose === "ending") {
     say([["police", "..."], ["police", "You broke the CORE?!"], ["you", "Huh?! Was I not supposed to?"], ["police", "Nobody has ever done that. Not even the Rock police."], ["police", "...That's it. You're promoted. You are the Rock police now."]],
       () => { p.state = "out"; award("core"); openModal("ending"); SFX.levelUp(); confetti(100); });
@@ -2013,6 +2335,16 @@ const ACH = [
   { id: "skin3", name: "Fashion Miner", desc: "Own 3 pickaxe skins", test: s => SKINS.filter(k => s.skins[k.id]).length >= 3 },
   { id: "skinAll", name: "Collector's Edition", desc: "Own every pickaxe skin", test: s => SKINS.every(k => s.skins[k.id]) },
   { id: "perk", name: "Perky", desc: "Buy a Rebirth perk", test: s => Object.keys(s.perks).length > 0 },
+  { id: "deepheart", name: "Heartbeat", desc: "Dig below the Core to The Deep Heart", test: s => s.maxLayer >= 5 },
+  { id: "boss5", name: "Heartbreaker", desc: "Defeat The Heart Guardian", test: s => s.bossKills[5] >= 1 },
+  { id: "museum1", name: "Opening Day", desc: "Put a mineral on display in the Museum", test: s => s.museum.length >= 1 },
+  { id: "curator", name: "Curator", desc: "Fill all 6 Museum pedestals", test: s => s.museum.slice(0, museumSlots(s)).length >= MUSEUM_SLOTS },
+  { id: "masterpiece", name: "Masterpiece", desc: "Display an Admin mineral", test: s => s.museum.some(id => MINERALS[id] && MINERALS[id].rarity === "Admin") },
+  { id: "thief1", name: "Stop, Thief!", desc: "Catch a rock thief", test: s => s.thiefCaught >= 1 },
+  { id: "thief5", name: "Most Wanted List", desc: "Catch 5 rock thieves", test: s => s.thiefCaught >= 5 },
+  { id: "chief", name: "Meet the Chief", desc: "Get a visit from the Chief of the Rock police", test: s => s.chiefMet },
+  { id: "badge", name: "Lost and Found", desc: "Find the Chief's lost badge below the Core", test: s => s.found[BADGE_MINERAL] > 0 },
+  { id: "double", name: "Seeing Double", desc: "Be there for a Double Drop", test: () => false },
   { id: "rush", name: "Gold Fever", desc: "Be there for a Gold Rush", test: () => false },
   { id: "frenzy", name: "Frenzy!", desc: "Be there for a Pickaxe Frenzy", test: () => false },
   { id: "police", name: "Who Are You??", desc: "Meet the Rock police", test: () => false },
@@ -2044,6 +2376,7 @@ function tick() {
   if (ui.trans) {
     const tr = ui.trans; tr.t++;
     if (tr.t === 14) {
+      if (thief) { S.gold += thief.stolen; thief = null; }   // he drops the gold when you leave
       S.layer = tr.to; caveCache = null; music.layer = S.layer; falling.length = 0; floaters.length = 0; ui.linger = [];
       if (police.state === "stand") { police.state = "off"; police.quota = null; ui.dialog = null; }
       rock.pause = 0; newRock(); computeLayout();
@@ -2088,6 +2421,12 @@ function tick() {
   // timed events
   if (ev.rush > 0 && --ev.rush === 0) { music.rush = false; linger("GOLD RUSH x3", 0, "#ffcc33"); }
   if (ev.frenzy > 0 && --ev.frenzy === 0) linger("PICKAXE FRENZY x2", 0, "#ff8a2a");
+  if (ev.double > 0 && --ev.double === 0) linger("DOUBLE DROP", 0, "#7dff6a");
+  if (thief) {
+    thief.walk += 0.3; thief.x += thief.vx;
+    if (thief.x > W + 60) { S.heists++; linger(`ROCK THIEF: GOT AWAY (${thief.hits} / 3)`, thief.hits / 3, "#ff6a5a"); banner("HE GOT AWAY...", "The Rock police is on it.", "#ff7a6a", 80); thief = null; }
+  }
+  if (ui.pendingChief > 0 && --ui.pendingChief <= 0 && police.state === "off" && !ui.dialog) startPolice("chief");
   if (ev.rush > 0 && T % 3 === 0) addPart({ k: "ember", x: rand() * W, y: H, vx: 0, vy: -2 - rand() * 2, c: "#ffcc33", life: 0, max: 120 });
   if ((S.layer === 2 || S.layer === 4) && T % 4 === 0) addPart({ k: "ember", x: rand() * W, y: H - 20, vx: (rand() - 0.5), vy: -1 - rand() * 1.5, c: "#ff8a2a", life: 0, max: 140 });
   // the next random event (paused while a menu, dialog or depth change is open)
@@ -2213,7 +2552,7 @@ function drawHUD() {
   while (bits.length > 1 && textW(bits.join("   ·   "), 15, FONT_B) > leftMax) bits.pop();   // never run into the depth badge
   label(bits.join("   ·   "), 74, 78, 15, "#cbbca8", "left", FONT_B, true);
   panel(bx, 10, bw, 62, 14);
-  label(LAYERS[S.layer].name.toUpperCase(), W / 2, 44, 26, ["#d8cbb8", "#a8d4ff", "#ffa060", "#c89aff", "#ffd060"][S.layer], "center");
+  label(LAYERS[S.layer].name.toUpperCase(), W / 2, 44, 26, ["#d8cbb8", "#a8d4ff", "#ffa060", "#c89aff", "#ffd060", "#ff7a9a"][S.layer], "center");
   label(`DEPTH ${S.layer + 1} / ${LAYERS.length}` + (S.rebirths ? `   ·   REBIRTH ${S.rebirths}` : ""), W / 2, 63, 13, "#9a8c7c", "center", FONT_B, false);
   if (S.layer > 0) button("up", bx - 52, 16, 46, 50, "", { icon: "up", disabled: !!ui.trans, onClick: () => { SFX.click(); goLayer(S.layer - 1); } });
   if (S.layer < S.maxLayer) button("down", bx + bw + 6, 16, 46, 50, "", { icon: "down", disabled: !!ui.trans, onClick: () => { SFX.click(); goLayer(S.layer + 1); } });
@@ -2227,6 +2566,7 @@ function drawHUD() {
   const dy = H - 76; x = W - bs - 14;
   button("idx", x, dy, bs, bs, "", { icon: "book", badge: found + "", onClick: () => { SFX.click(); ui.idxLayer = Math.min(S.layer, 4); openModal("index"); } }); x -= bs + 10;
   button("ach", x, dy, bs, bs, "", { icon: "trophy", badge: achN + "", onClick: () => { SFX.click(); ui.achPage = 0; openModal("ach"); } }); x -= bs + 10;
+  button("museumbtn", x, dy, bs, bs, "", { icon: "museum", badge: museumMult(S) > 1 ? "x" + museumMult(S).toFixed(2) : "", badgeColor: "#2f7aae", onClick: () => { SFX.click(); ui.musPage = 0; openModal("museum"); } }); x -= bs + 10;
   if (S.police) { const ready = S.quests.filter(q => questProg(q) >= q.n).length; button("orders", x, dy, bs, bs, "", { icon: "orders", badge: ready ? ready + "!" : "", badgeColor: "#2fae3a", onClick: () => { SFX.click(); fillQuests(); openModal("orders"); } }); x -= bs + 10; }
   if (S.rebirths > 0 || S.stars > 0) button("perks", x, dy, bs, bs, "", { icon: "star", badge: S.stars ? S.stars + "" : "", badgeColor: "#c08a00", onClick: () => { SFX.click(); openModal("perks"); } });
   // shop button (bottom left, like his)
@@ -2243,6 +2583,8 @@ function drawBars() {
   if (ev.frenzy > 0) list.push({ text: "PICKAXE FRENZY x2", f: ev.frenzy / ev.frenzyMax, color: "#ff8a2a" });
   if (ev.vein > 0) list.push({ text: `CRYSTAL VEIN: ${ev.vein} lucky rocks`, f: ev.vein / ev.veinMax, color: "#4dc3ff" });
   if (police.quota) list.push({ text: `INSPECTION: ${police.quota.got} / ${police.quota.need}   ${Math.ceil(police.quota.t / 30)}s`, f: police.quota.got / police.quota.need, color: "#9ab0ff" });
+  if (ev.double > 0) list.push({ text: "DOUBLE DROP", f: ev.double / ev.doubleMax, color: "#7dff6a" });
+  if (thief) list.push({ text: `ROCK THIEF: ${thief.hits} / 3 hits`, f: 1 - clamp((thief.x - lay.sceneL) / (W - lay.sceneL), 0, 1), color: "#ff6a5a" });
   if (rock.boss && BOSSES[S.layer] && !ui.trans) list.push({ text: `${BOSSES[S.layer].name}: ${fmt(curHP() - rock.dmg)} HP`, f: 1 - rock.dmg / curHP(), color: "#ff5a4a" });
   for (const l of ui.linger) list.push(Object.assign({ a: Math.min(1, l.t / 10) }, l));
   const w = lay.barsW; if (w < 120) return;
@@ -2334,7 +2676,7 @@ function drawIndex() {
   const total = S.found.filter(n => n > 0).length;
   label(`${total} / ${MINERALS.length} found`, f.x + 290, f.y + 48, 18, "#cbbca8", "left", FONT_B);
   let tx = f.x + 24;
-  const tabW = (f.w - 48 - 4 * 8) / 5;
+  const tabW = (f.w - 48 - (LAYERS.length - 1) * 8) / LAYERS.length;
   LAYERS.forEach((l, L) => {
     const known = L <= S.maxLayer || LAYER_MINERALS[L].some(m => S.found[m.id] > 0);
     button("tab" + L, tx, f.y + 70, tabW, 40, known ? l.name : "???", { style: ui.idxLayer === L ? "gold" : "stone", size: 17, disabled: !known, onClick: () => { SFX.click(); ui.idxLayer = L; ui.idxPick = LAYER_MINERALS[L][0].id; } });
@@ -2351,9 +2693,9 @@ function drawIndex() {
     const found = S.found[m.id] > 0, sel = ui.idxPick === m.id, id = "min" + m.id, hov = hoverId === id;
     rr(x, y, cw, chh, 12); ctx.fillStyle = sel ? "#4e4032" : hov ? "#3e332a" : "#2a221c"; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = sel ? "#ffd447" : INK; ctx.stroke();
-    const ms = Math.min(30, chh * 0.3);
+    const ms = Math.min(cw * 0.25, chh * 0.26);   // his pictures are wide (they have his labels)
     if (found) glow(x + cw / 2, y + chh * 0.46, ms * 1.5, rarityGlowColor(m.rarity, T / 30), 0.35);
-    drawMineral(m, x + cw / 2, y + chh * 0.46, ms + (hov ? 3 : 0), { sil: !found, t: T / 30 });
+    drawMineral(m, x + cw / 2, y + chh * 0.55, ms + (hov ? 1.5 : 0), { sil: !found, t: T / 30 });
     if (!found) label("?", x + cw / 2, y + chh * 0.56, ms, "#6a5e52", "center");
     rr(x + 8, y + chh - 12, cw - 16, 5, 2); ctx.fillStyle = found ? rarityColor(m.rarity, T / 30) : "#3a322a"; ctx.fill();
     if (found) label("x" + fmt(S.found[m.id]), x + cw - 8, y + 20, 13, "#cbbca8", "right", FONT_B);
@@ -2363,9 +2705,9 @@ function drawIndex() {
   const m = MINERALS[ui.idxPick], found = S.found[m.id] > 0;
   const px = f.x + f.w - paneW - 24, py = f.y + 126, pw = paneW, ph = f.h - 150;
   rr(px, py, pw, ph, 14); ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
-  const t = T / 30, ms = Math.min(82, ph * 0.18);
+  const t = T / 30, ms = Math.min(pw * 0.26, ph * 0.17);
   if (found) { glow(px + pw / 2, py + ph * 0.25, ms * 1.8, rarityGlowColor(m.rarity, t), 0.55 + 0.1 * Math.sin(t * 2)); for (let i = 0; i < 5; i++) star(px + pw / 2 + Math.cos(t + i * 1.3) * pw * 0.3, py + ph * 0.25 + Math.sin(t * 1.3 + i * 2) * ms * 0.7, 6 * (0.5 + 0.5 * Math.sin(t * 4 + i)), "#fff"); }
-  drawMineral(m, px + pw / 2, py + ph * 0.25 + Math.sin(t * 2) * 4, ms, { sil: !found, t });
+  drawMineral(m, px + pw / 2, py + ph * 0.38 + Math.sin(t * 2) * 4, ms, { sil: !found, t });
   const ly = py + ph * 0.55, cxp = px + pw / 2;
   const nm = found ? m.name : "???";
   label(nm, cxp, ly, fitSize(nm, 26, pw - 20), "#ffffff", "center");
@@ -2454,6 +2796,51 @@ function drawPerks() {
     button("perk" + i, x + w - 160, y + 66, 144, 42, maxed ? "MAX" : `${p.cost} star${p.cost > 1 ? "s" : ""}`, { style: !maxed && S.stars >= p.cost ? "gold" : "stone", disabled: maxed || S.stars < p.cost, size: 18, onClick: () => { if (buyPerk(S, p.id)) { SFX.levelUp(); award("perk"); save(); } } });
   });
 }
+// ---------- the Museum: put your best finds on display for a gold bonus ----------
+function drawMuseum() {
+  const f = modalFrame(1040, 640, "MUSEUM");
+  const slots = museumSlots(S), t = T / 30;
+  const bonusTxt = `Display bonus: x${museumMult(S).toFixed(2)} gold`;
+  label(bonusTxt, f.x + 220, f.y + 48, fitSize(bonusTxt, 20, f.w - 520, FONT_B), "#9fd8ff", "left", FONT_B);
+  label("Each mineral on display gives +1.5% gold for every rarity step (Admin = +18%). Click one to take it down.", f.x + f.w / 2, f.y + 84, fitSize("Each mineral on display gives +1.5% gold for every rarity step (Admin = +18%). Click one to take it down.", 15, f.w - 60, FONT_B), "#cbbca8", "center", FONT_B, false);
+  // pedestals
+  const pw = (f.w - 60) / MUSEUM_SLOTS;
+  for (let i = 0; i < MUSEUM_SLOTS; i++) {
+    const x = f.x + 30 + i * pw, cx = x + pw / 2, by = f.y + 290, open = i < slots, id = S.museum[i];
+    ctx.fillStyle = open ? "#8a8276" : "#3a342e"; ctx.fillRect(cx - pw * 0.32, by, pw * 0.64, 24); ctx.lineWidth = 2; ctx.strokeStyle = "#000000"; ctx.strokeRect(cx - pw * 0.32, by, pw * 0.64, 24);   // flat, like his drawings
+    ctx.fillStyle = open ? "#a39b8e" : "#2e2924"; ctx.fillRect(cx - pw * 0.38, by + 24, pw * 0.76, 12); ctx.strokeRect(cx - pw * 0.38, by + 24, pw * 0.76, 12);
+    if (!open) { drawIcon("lock", cx, by - 40, 30, "#6a5e52"); label("Dig deeper", cx, by - 6, 14, "#6a5e52", "center", FONT_B, false); continue; }
+    if (id !== undefined && MINERALS[id] && S.found[id] > 0) {
+      const m = MINERALS[id], tier = tierOf(m.rarity), ms = Math.min(pw * 0.24, 40);
+      glow(cx, by - 70, ms * 3, rarityGlowColor(m.rarity, t), 0.45);
+      drawMineral(m, cx, by - 40 + Math.sin(t * 2 + i) * 3, ms, { t });
+      label(`+${(tier * 1.5).toFixed(1)}%`, cx, by + 58, 16, "#9fd8ff", "center");
+      reg("mus" + i, x + 4, f.y + 110, pw - 8, 200, () => { SFX.click(); S.museum.splice(i, 1); save(); });
+    } else label("empty", cx, by - 20, 15, "#6a5e52", "center", FONT_B, false);
+  }
+  // your finds, rarest first
+  const shown = new Set(S.museum.slice(0, slots));
+  const list = MINERALS.filter(m => S.found[m.id] > 0 && !shown.has(m.id)).sort((a, b) => tierOf(b.rarity) - tierOf(a.rarity) || b.gold - a.gold);
+  label("Your finds (click to put on display):", f.x + 30, f.y + 384, 18, "#f4ead8");
+  const cw = 104, chh = 104, cols = Math.max(1, Math.floor((f.w - 60) / (cw + 8))), rows = Math.max(1, Math.floor((f.h - 424) / (chh + 8))), per = cols * rows;
+  const pages = Math.max(1, Math.ceil(list.length / per)); ui.musPage = clamp(ui.musPage || 0, 0, pages - 1);
+  list.slice(ui.musPage * per, ui.musPage * per + per).forEach((m, i) => {
+    const x = f.x + 30 + (i % cols) * (cw + 8), y = f.y + 404 + Math.floor(i / cols) * (chh + 8), hid = "mf" + m.id, hov = hoverId === hid;
+    rr(x, y, cw, chh, 10); ctx.fillStyle = hov ? "#3e332a" : "#2a221c"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = INK; ctx.stroke();
+    drawMineral(m, x + cw / 2, y + chh * 0.55, cw * 0.24, { t });
+    const full = S.museum.length >= slots;
+    reg(hid, x, y, cw, chh, () => {
+      if (S.museum.length >= slots) { SFX.deny(); return; }
+      S.museum.push(m.id); SFX.buy(); save();
+    });
+    if (full && hov) label("Full: take one down first", x + cw / 2, y - 6, 13, "#ff8a6a", "center", FONT_B);
+  });
+  if (!list.length) label("Break rocks to find minerals!", f.x + f.w / 2, f.y + 460, 18, "#8a7e70", "center", FONT_B, false);
+  if (pages > 1) {
+    button("musprev", f.x + f.w - 290, f.y + 358, 110, 34, "Back", { size: 16, disabled: ui.musPage === 0, onClick: () => { SFX.click(); ui.musPage--; } });
+    button("musnext", f.x + f.w - 170, f.y + 358, 110, 34, "Next", { size: 16, disabled: ui.musPage >= pages - 1, onClick: () => { SFX.click(); ui.musPage++; } });
+  }
+}
 function slider(name, x, y, w, text) {
   label(text, x, y - 12, 20, "#f4ead8");
   label(Math.round(settings[name] * 100) + "%", x + w, y - 12, 18, "#cbbca8", "right", FONT_B);
@@ -2513,14 +2900,14 @@ function drawDialog() {
   ctx.save(); ctx.globalAlpha = a;
   panel(x, y, w, h, 18, { top: "#2a2430", bot: "#16121a" });
   ctx.beginPath(); ctx.arc(x + 56, y + h / 2, 38, 0, TAU); ctx.fillStyle = who === "you" ? "#4a3a24" : "#2a3040"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
-  ctx.save(); ctx.beginPath(); ctx.arc(x + 56, y + h / 2, 36, 0, TAU); ctx.clip(); drawHead(who === "you" ? "miner" : "police", x + 56, y + h / 2 + 10, 24, who === "you" ? 1 : -1, T / 30); ctx.restore();
-  label(who === "you" ? "You" : "Rock police", x + 110, y + 34, 20, who === "you" ? "#ffb84a" : "#9ab0ff");
+  ctx.save(); ctx.beginPath(); ctx.arc(x + 56, y + h / 2, 36, 0, TAU); ctx.clip(); portrait(who, x + 56, y + h / 2, 36); ctx.restore();
+  label({ you: "You", police: "Rock police", chief: "Chief of the Rock police", thief: "Rock thief" }[who] || who, x + 110, y + 34, 20, { you: "#ffb84a", chief: "#ffd447", thief: "#ff7a6a" }[who] || "#9ab0ff");
   ctx.save(); ctx.beginPath(); ctx.rect(x + 108, y, w - 120, h); ctx.clip();
   label(text.slice(0, Math.floor(d.ch)), x + 110, y + 70, fitSize(text, 22, w - 130, FONT_B), "#ffffff", "left", FONT_B, false);
   ctx.restore();
   if (d.ch >= text.length) label("click ▸", x + w - 18, y + h - 14, 14, `rgba(255,255,255,${0.4 + 0.3 * Math.sin(T / 5)})`, "right", FONT_B, false);
   ctx.restore();
-  reg("dialog", x, y, w, h, nextLine);
+  if (!ui.modal) reg("dialog", x, y, w, h, nextLine);   // a menu on top covers it
 }
 function drawToasts() {
   const tt = ui.toasts[0]; if (!tt) return;
@@ -2584,12 +2971,13 @@ function drawWorld(t) {
   }
   drawMiner(lay.minerX, lay.ground, s, game.swing, t, game.smear, skin);
   if (!L.core || !S.coreBroken) for (let i = 0; i < S.helper; i++) drawMiner(lay.miniX(i), lay.ground, s * 0.5, game.minis[i], t + i, game.minis[i] < 0.3 ? 1 - game.minis[i] * 3 : 0, SKINS[0], -1, false);
-  if (police.state !== "off") drawPolice(police.x, lay.ground, s, police.walk, t, police.side > 0 ? -1 : 1, police.state === "stand" && !!ui.dialog);
+  if (police.state !== "off") drawPolice(police.x, lay.ground, s, police.walk, t, police.side > 0 ? -1 : 1, police.state === "stand" && !!ui.dialog, police.purpose === "chief" ? "chief" : "");
+  if (thief) drawThief(thief.x, lay.ground, s, thief.walk, t);
   for (const b of falling) {
     const bx = fx(b), hov = Math.hypot(mouse.x - bx, mouse.y - b.y) < b.r * 1.3 && !regionAt(mouse.x, mouse.y);
     if (b.kind === "meteor") drawMeteor(bx, b.y, b.r, b.vx, b.vy, t, !!b.landed);
-    else if (GFX.canSprite) drawRockSprite(bx, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, b.rot);
-    else drawRock(bx, b.y, b.r, ROCK_PAL[Math.min(S.layer, 3)], b.shape, 0, { rot: b.rot });
+    else if (GFX.canSprite) drawRockSprite(bx, b.y, b.r, ROCK_PAL[mineLayer()], b.shape, b.rot);
+    else drawRock(bx, b.y, b.r, ROCK_PAL[mineLayer()], b.shape, 0, { rot: b.rot });
     if (hov) { ctx.beginPath(); ctx.arc(bx, b.y, b.r * 1.25, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,220,120,0.85)"; ctx.stroke(); }
   }
   // minerals floating up (his clones: up 5 per frame, fading)
@@ -2601,7 +2989,7 @@ function drawWorld(t) {
     // starts just above the rock (like his clone) and rises, but stops below the HUD / dialog box
     const x = lay.rockX + f.x * lay.s, start = f.y0 !== undefined ? f.y0 - 20 : lay.rockY - lay.R * 1.05 - sz * 0.3;
     const full = lay.rockR * (0.42 + tier * 0.025) * (f.id === CORE_MINERAL ? 2 : 1);   // size once it has popped in
-    const top = lay.hud + 40 + (ui.dialog ? 220 : 0) + full * 1.15 + 46;
+    const top = lay.hud + 30 + (ui.dialog ? 220 : 0) + full * 2.2 + 24;   // his picture reaches about 2 sizes above its centre
     const y = start - k * clamp(start - top, 30, 210);
     const a = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
     ctx.save(); ctx.globalAlpha = a;
@@ -2609,11 +2997,8 @@ function drawWorld(t) {
     if (tier >= 5 && !GFX.low) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.translate(x, y); ctx.rotate(t * 0.8); ctx.fillStyle = rarityGlowColor(m.rarity, t); ctx.globalAlpha = a * 0.18; for (let i = 0; i < 8; i++) { ctx.rotate(TAU / 8); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sz * 0.3, sz * 4); ctx.lineTo(sz * 0.3, sz * 4); ctx.fill(); } ctx.restore(); }
     drawMineral(m, x, y, sz, { t });
     if (tier >= 2) for (let i = 0; i < Math.min(8, tier + 1); i++) star(x + Math.cos(t * 2 + i * 2.4) * sz * 1.5, y + Math.sin(t * 2.6 + i * 1.7) * sz * 1.2, sz * 0.18 * (0.5 + 0.5 * Math.sin(t * 9 + i)), "#ffffff");
-    label("+" + fmt(f.gained), x, y + sz * 0.9 + 26, 24, "#ffd447", "center");
-    if (tier >= 1 || f.isNew) {
-      label(m.name, x, y - sz * 0.95, 18, "#ffffff", "center");
-      label((f.isNew ? "NEW!  " : "") + m.rarity, x, y - sz * 0.95 - 20, 14, rarityColor(m.rarity, t), "center", FONT_B);
-    }
+    label("+" + fmt(f.gained), x, y + sz * 1.25 + 22, 24, "#ffd447", "center");   // what you really got (his label shows the base gold)
+    if (f.isNew) label("NEW!", x, y - sz * 2.15, 18, rarityColor(m.rarity, t), "center");
     ctx.restore();
   }
   drawParts();
@@ -2749,6 +3134,7 @@ function frame(now) {
       else if (ui.modal === "ending") drawEnding();
       else if (ui.modal === "orders") drawOrders();
       else if (ui.modal === "perks") drawPerks();
+      else if (ui.modal === "museum") drawMuseum();
     }
   } catch (e) { if (!frame.warned) { frame.warned = true; console.error(e); } }
   ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
